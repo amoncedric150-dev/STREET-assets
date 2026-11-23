@@ -542,6 +542,7 @@ const MODELS=[
  {id:'nb',name:'Neighbourhood',file:'neighbourhood_city_modular_lowpoly.glb'},
  {id:'pc',name:'Procedural City',file:'procedural_city_6.glb'}];
 const GAL=new V3(20000,0,0);
+let LIGHT=1024,capOld=null;const restoreCap=()=>{const cp=engine._caps;if(cp&&capOld!=null){cp.maxTextureSize=capOld;capOld=null}};
 let isOpen=false,started=false,wire=false,sel='all',pending=false;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const fmtN=n=>n>=1e6?(n/1e6).toFixed(2)+' M':n>=1e3?(n/1e3).toFixed(1)+' k':String(n);
@@ -572,13 +573,13 @@ const gH=pn.querySelector('#gH'),gBody=pn.querySelector('#gBody');
 const gcam=new B3.ArcRotateCamera('gcam',-Math.PI/2,1.15,200,V3.Zero(),scene);gcam.useNaturalPinchZoom=true;gcam.wheelDeltaPercentage=.02;
 let ground=null;const refs=[];
 
-function parseGLB(u8){
+function parseGLB(u8,total){
  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
  if(u8.byteLength<20||dv.getUint32(0,true)!==0x46546C67)return{err:'Fichier non GLB (en-tête "glTF" absent). Début du contenu : '+JSON.stringify(new TextDecoder().decode(u8.slice(0,80)))};
  const len=dv.getUint32(8,true),cl=dv.getUint32(12,true);
  if(dv.getUint32(16,true)!==0x4E4F534A)return{err:'Chunk JSON introuvable'};
  let j;try{j=JSON.parse(new TextDecoder().decode(u8.subarray(20,20+cl)))}catch(e){return{err:'JSON glTF illisible : '+e.message}}
- return{ver:dv.getUint32(4,true),len,truncated:len>u8.byteLength,gen:j.asset&&j.asset.generator||'?',extU:j.extensionsUsed||[],extR:j.extensionsRequired||[],
+ return{ver:dv.getUint32(4,true),len,truncated:len>(total||u8.byteLength),gen:j.asset&&j.asset.generator||'?',extU:j.extensionsUsed||[],extR:j.extensionsRequired||[],
   nodes:(j.nodes||[]).length,meshes:(j.meshes||[]).length,materials:(j.materials||[]).length,textures:(j.textures||[]).length,images:(j.images||[]).length,anims:(j.animations||[]).length,
   mimes:[...new Set((j.images||[]).map(i=>i.mimeType||'?'))]};
 }
@@ -587,31 +588,31 @@ const idb={db:null,open(){return new Promise((res,rej)=>{const r=indexedDB.open(
  async get(k){try{const d=this.db||(this.db=await this.open());return await new Promise((res,rej)=>{const q=d.transaction('f').objectStore('f').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})}catch(e){return null}},
  async put(k,v){try{const d=this.db||(this.db=await this.open());await new Promise((res,rej)=>{const t=d.transaction('f','readwrite');t.objectStore('f').put(v,k);t.oncomplete=res;t.onerror=()=>rej(t.error)});return true}catch(e){return false}}};
 async function download(M,R,file){
- if(file){R.status='Lecture du fichier local…';ask();const ab=await file.arrayBuffer();R.bytes=ab.byteLength;R.need=false;R.status='Mémorisation dans le navigateur…';ask();const sv=await idb.put(M.file,ab);R.http='fichier local : '+file.name+(sv?' (mémorisé : plus besoin de le rechoisir)':' (mémorisation impossible : à rechoisir à chaque ouverture)');return new Uint8Array(ab)}
- R.status='Recherche dans la mémoire du navigateur…';ask();
- {const c=await idb.get(M.file);if(c&&c.byteLength>1000){R.bytes=c.byteLength;R.http='mémoire du navigateur (choisi précédemment)';return new Uint8Array(c)}}
+ if(file){R.bytes=file.size;R.need=false;R.http='fichier local : '+file.name;return file}
  R.status='Téléchargement…';ask();
  let resp=null,why='';
  for(const u of['glb/'+M.file,R.url]){try{const r=await fetch(u,{mode:'cors'});if(r.ok){resp=r;R.http=r.status+' ('+(u===R.url?'Hugging Face':'fichier du site')+')';break}why+=u+' → HTTP '+r.status+(r.status===404?' (introuvable)':r.status===401||r.status===403?' (accès refusé)':'')+'. '}catch(e){why+=u+' → '+e.message+' (CORS ou réseau). '}}
  if(!resp){R.note=why;const e=new Error('NEEDFILE');e.need=true;throw e}
  const total=+resp.headers.get('content-length')||0,rd=resp.body.getReader(),ch=[];let got=0,t=0;
  for(;;){const{done,value}=await rd.read();if(done)break;ch.push(value);got+=value.length;const n=performance.now();if(n-t>250){t=n;R.status='Lecture '+(total?Math.round(got/total*100)+' %':fmtMB(got));ask()}}
- const u8=new Uint8Array(got);let o=0;for(const c of ch){u8.set(c,o);o+=c.length}
- R.bytes=got;return u8;
+ const bl=new Blob(ch,{type:'model/gltf-binary'});ch.length=0;R.bytes=bl.size;return bl;
 }
 
 async function loadOne(M,file){
  const R=M.rep={url:BASE+M.file,status:'En attente',issues:[],ok:false};const t0=performance.now();
  try{
-  const u8=await download(M,R,file);
-  R.glb=parseGLB(u8);if(R.glb.err)throw new Error(R.glb.err);
+  const blob=await download(M,R,file);
+  const h0=new Uint8Array(await blob.slice(0,Math.min(20,blob.size)).arrayBuffer());let hl=20;if(h0.length>=20)hl=20+new DataView(h0.buffer).getUint32(12,true);
+  const u8=new Uint8Array(await blob.slice(0,Math.min(hl,blob.size)).arrayBuffer());
+  R.glb=parseGLB(u8,blob.size);if(R.glb.err)throw new Error(R.glb.err);
   const g=R.glb;
-  if(g.truncated)R.issues.push(['e','Fichier tronqué ('+fmtMB(u8.length)+' reçus sur '+fmtMB(g.len)+')']);
+  if(g.truncated)R.issues.push(['e','Fichier tronqué ('+fmtMB(blob.size)+' reçus sur '+fmtMB(g.len)+')']);
   if(g.extR.some(x=>/draco|meshopt/i.test(x)))R.issues.push(['w','Compression '+g.extR.join(', ')+' : le décodeur est téléchargé depuis le CDN de Babylon ; s’il est bloqué, le chargement échouera']);
   if(g.extR.some(x=>/basisu|ktx/i.test(x)))R.issues.push(['w','Textures KTX2/Basis : transcodeur externe requis']);
-  if(u8.length>150*1048576)R.issues.push(['w','Fichier très lourd ('+fmtMB(u8.length)+') : risque de manque de mémoire sur mobile']);
+  if(blob.size>150*1048576)R.issues.push(['w','Fichier très lourd ('+fmtMB(blob.size)+') : risque de manque de mémoire sur mobile']);
   R.status='Décodage…';ask();await sleep(30);
-  const url=URL.createObjectURL(new Blob([u8],{type:'model/gltf-binary'}));
+  const url=URL.createObjectURL(blob);
+  const cp=engine._caps;if(cp&&LIGHT){capOld=cp.maxTextureSize;cp.maxTextureSize=Math.min(capOld,LIGHT)}
   let res;try{res=await B3.SceneLoader.ImportMeshAsync('','',url,scene,null,'.glb')}finally{URL.revokeObjectURL(url)}
   res.lights.forEach(l=>l.dispose());res.animationGroups.forEach(a=>a.stop());
   const holder=new B3.TransformNode('glb_'+M.id,scene);
@@ -629,6 +630,7 @@ async function loadOne(M,file){
   }
   const texs=new Set();mats.forEach(mt=>mt.getActiveTextures().forEach(t=>texs.add(t)));
   for(let i=0;i<80&&![...texs].every(t=>t.isReady());i++)await sleep(250);
+  restoreCap();
   let tMax=0,tMB=0,nr=0;texs.forEach(t=>{if(!t.isReady()){nr++;return}const s=t.getSize();tMax=Math.max(tMax,s.width,s.height);tMB+=s.width*s.height*4*1.33/1048576});
   const types={};mats.forEach(m=>{const c=m.getClassName();types[c]=(types[c]||0)+1});
   const noTex=[...mats].filter(m=>!m.getActiveTextures().length).length;
@@ -645,7 +647,7 @@ async function loadOne(M,file){
   M.holder=holder;M.lo=lo.clone();M.hi=hi.clone();
   R.ms=performance.now()-t0;R.ok=true;R.status='Chargé';
   layout();
- }catch(e){if(e&&e.need){R.ok=false;R.need=true;R.status='Fichier à choisir';ask();return}R.ok=false;R.need=false;R.status='Échec';R.fail=String(e&&e.message||e);
+ }catch(e){restoreCap();if(e&&e.need){R.ok=false;R.need=true;R.status='Fichier à choisir';ask();return}R.ok=false;R.need=false;R.status='Échec';R.fail=String(e&&e.message||e);
   if(/draco|meshopt|decoder/i.test(R.fail))R.fail+=' → décodeur de compression probablement bloqué';}
  ask();
 }
@@ -699,14 +701,21 @@ function lines(M){
 }
 function reportText(){return 'RAPPORT GLB — '+new Date().toISOString()+'\n'+MODELS.map(M=>'\n## '+M.name+' ['+(M.rep?M.rep.status:'non chargé')+']\n'+lines(M).map(l=>l[0]+': '+l[1]).join('\n')).join('\n')}
 function ask(){if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;draw()})}
+function btns(M,R){const b=(a,t)=>'<button class="gf" data-act="'+a+'" data-id="'+M.id+'">'+t+'</button> ';
+ if(!R)return b('load','⬇️ Charger ce modèle');if(R.ok)return b('unload','🗑️ Décharger (libère la mémoire)');
+ if(R.status==='Échec'||R.need)return b('load','🔄 Réessayer')+b('file','📂 Choisir le fichier .glb');return ''}
+function unload(M){if(!M.holder)return;M.holder.dispose(false,true);M.holder=null;M.rep=null;layout();ask()}
 function draw(){
- gBody.innerHTML=MODELS.map(M=>{const R=M.rep,ic=!R?'⏳':R.need?'📂':R.ok?(R.issues.some(i=>i[0]==='e')?'❌':R.issues.length?'⚠️':'✅'):R.status==='Échec'?'❌':'⏳';
-  return '<div class="gc"><h4>'+ic+' '+esc(M.name)+' <small style="font-weight:400;color:#9fb4c7">— '+esc(R?R.status:'En attente')+'</small></h4>'+lines(M).map(([a,b,c])=>'<div class="r"><b>'+esc(a)+'</b><span class="'+c+'">'+esc(b)+'</span></div>').join('')+''+(R&&(R.need||R.status==='Échec')?'<button class="gf" data-id="'+M.id+'">📂 Choisir le fichier .glb</button>':'')+'</div>'}).join('');
+ if(MODELS.some(m=>m.rep)){try{localStorage.setItem('glbrep',reportText())}catch(e){}}
+ let prev='';if(MODELS.every(m=>!m.rep)){try{const t=localStorage.getItem('glbrep');if(t)prev='<div class="gc"><h4>📄 Dernier rapport enregistré</h4><pre style="white-space:pre-wrap;margin:0;font:11px/1.4 monospace;overflow-wrap:anywhere">'+esc(t)+'</pre></div>'}catch(e){}}
+ gBody.innerHTML=prev+MODELS.map(M=>{const R=M.rep,ic=!R?'⏳':R.need?'📂':R.ok?(R.issues.some(i=>i[0]==='e')?'❌':R.issues.length?'⚠️':'✅'):R.status==='Échec'?'❌':'⏳';
+  return '<div class="gc"><h4>'+ic+' '+esc(M.name)+' <small style="font-weight:400;color:#9fb4c7">— '+esc(R?R.status:'En attente')+'</small></h4>'+lines(M).map(([a,b,c])=>'<div class="r"><b>'+esc(a)+'</b><span class="'+c+'">'+esc(b)+'</span></div>').join('')+''+btns(M,R)+'</div>'}).join('');
 }
 function head(){
  gH.innerHTML='';const add=(t,fn,on)=>{const b=document.createElement('button');b.textContent=t;if(on)b.className='on';b.onclick=fn;gH.appendChild(b)};
  add('Tous',()=>{sel='all';focus('all');head()},sel==='all');
  MODELS.forEach(M=>add(M.name,()=>{sel=M.id;focus(M.id);head()},sel===M.id));
+ add('Textures '+(LIGHT?LIGHT+' px':'originales'),()=>{LIGHT=LIGHT?0:1024;head()},false);
  add('Filaire',()=>{wire=!wire;scene.forceWireframe=wire;head()},wire);
  add('Copier le rapport',async()=>{const t=reportText();try{await navigator.clipboard.writeText(t);b0.textContent='Copié ✓'}catch(e){let ta=gBody.querySelector('#gT');if(!ta){ta=document.createElement('textarea');ta.id='gT';gBody.appendChild(ta)}ta.value=t;ta.select()}setTimeout(()=>{b0.textContent='Copier le rapport'},1500)});
  const b0=gH.lastChild;
@@ -717,11 +726,13 @@ function toggle(on){
  for(const id of['pad','hud'])$(id)&&($(id).style.display=on?'none':'');
  MODELS.forEach(m=>m.holder&&m.holder.setEnabled(on));refs.forEach(r=>r.setEnabled(on));ground&&ground.setEnabled(on);
  if(on){scene.activeCamera=gcam;gcam.attachControl(canvas,true);scene.fogMode=B3.Scene.FOGMODE_NONE;head();draw();focus(sel);
-  if(!started){started=true;(async()=>{for(const M of MODELS)await loadOne(M)})()}}
+  }
  else{gcam.detachControl();scene.activeCamera=cam;scene.fogMode=B3.Scene.FOGMODE_EXP2;scene.forceWireframe=false;wire=false}
 }
-gBody.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('.gf');if(!b)return;const M=MODELS.find(m=>m.id===b.dataset.id);
- const inp=document.createElement('input');inp.type='file';inp.accept='.glb,model/gltf-binary,application/octet-stream';inp.onchange=()=>{if(inp.files[0])loadOne(M,inp.files[0])};inp.click()});
+gBody.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('.gf');if(!b)return;const M=MODELS.find(m=>m.id===b.dataset.id),act=b.dataset.act;
+ if(act==='load'){if(!M.busy){M.busy=true;loadOne(M).finally(()=>{M.busy=false})}}
+ else if(act==='unload')unload(M);
+ else if(act==='file'){const inp=document.createElement('input');inp.type='file';inp.accept='.glb,model/gltf-binary,application/octet-stream';inp.onchange=()=>{if(inp.files[0])loadOne(M,inp.files[0])};inp.click()}});
 btn.onclick=()=>toggle(true);
 }
 
