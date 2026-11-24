@@ -159,7 +159,7 @@ function updateCam(dt,now){
 
 // ===== Chargement =====
 function start(o){
- clean(o);shrink(o,512);o.updateMatrixWorld(true);
+ clean(o);o.updateMatrixWorld(true);
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;lighten(o);
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
