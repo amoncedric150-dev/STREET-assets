@@ -19,8 +19,8 @@ button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;pad
 <div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button><button id="bi">Inspecter</button></div>
 <div id="insp"><pre id="ii">Touche un objet de la ville pour voir son nom.</pre><div class="ir"><button id="ih">Masquer</button><button id="in">Même nom</button><button id="im">Même matériau</button></div><div class="ir"><button id="iu">Annuler</button><button id="il">Liste</button></div><textarea id="it" readonly></textarea></div>
 <div id="joy"><div id="knob"></div></div>
-<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 // ===== Scène =====
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x9fc4e8);scene.fog=new THREE.Fog(0x9fc4e8,250,1500);
@@ -42,7 +42,7 @@ function clean(root){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push
 // Arbres du fichier : un seul gros mesh de feuilles (matériaux « FoliageTrees… ») et un d'écorce (« CityGenBark… ») par tuile
 const SANS=/sanstrees/i.test(location.search); // ouvrir la page avec ?sanstrees pour désactiver les nouveaux arbres
 let LOST=false;
-addEventListener('error',e=>{if(!LOST){msg.style.opacity=1;msg.textContent='Erreur : '+e.message+' (ligne '+e.lineno+')'}});
+addEventListener('error',e=>{if(!LOST){msg.style.opacity=1;msg.textContent='Erreur : '+e.message+' ('+String(e.filename||'').split('/').pop()+':'+e.lineno+')'}});
 const TREE_MAT=/^(FoliageTrees|CityGenBark)/i;
 const BARK_MAT=/^CityGenBark/i;
 let TREEPOS=[]; // arbres d'origine : {lx,lz,ly,h} dans le repère de la tuile (échelle 1)
@@ -130,7 +130,15 @@ function prepTree(root){root.updateMatrixWorld(true);const parts=[],box=new THRE
   [].concat(c.material).forEach(m=>{if(m&&m.map&&m.transparent){m.transparent=false;m.alphaTest=Math.max(m.alphaTest||0,.5);m.depthWrite=true}if(m)m.side=THREE.DoubleSide});g.deleteAttribute('skinIndex');g.deleteAttribute('skinWeight');g.applyMatrix4(c.matrixWorld);g.computeBoundingBox();box.union(g.boundingBox);parts.push({geo:g,mat:c.material})});
  const ct=box.getCenter(new THREE.Vector3());parts.forEach(p=>p.geo.translate(-ct.x,-box.min.y,-ct.z));
  return{parts,tris:Math.max(1,Math.round(tris)),H:Math.max(.001,box.max.y-box.min.y)}}
-function buildTrees(){
+let DEAD=false;
+function killTrees(e){if(DEAD)return;DEAD=true;
+ try{if(treeG)scene.remove(treeG);treeG=null;TALL=[];TMODEL=null;
+  if(wrap)wrap.traverse(c=>{if(c.isMesh){const ms=[].concat(c.material);if(ms.length&&ms.every(m=>m&&TREE_MAT.test(m.name||'')))c.visible=true}});
+  setTimeout(()=>{if(MAP&&wrap)buildMap()},100)}catch(x){}
+ msg.style.opacity=1;msg.textContent='Nouveaux arbres désactivés (erreur : '+((e&&e.message)||e)+')'}
+function buildTrees(){try{return buildTrees0()}catch(e){killTrees(e);return 0}}
+function buildTrees0(){
+ if(DEAD)return 0;
  if(treeG){scene.remove(treeG);treeG.traverse(o=>{if(o.isInstancedMesh)o.dispose()})}
  treeG=new THREE.Group();TALL=[];if(!TMODEL||!TREEPOS.length||!MAP)return 0;
  const s=s0*uf,tw=box0.x*s,td=box0.z*s,cc=(TILES-1)/2;
@@ -141,7 +149,8 @@ function buildTrees(){
  TMODEL.parts.forEach(p=>{const im=new THREE.InstancedMesh(p.geo,p.mat,TALL.length);im.frustumCulled=false;im.count=0;treeG.add(im)});
  scene.add(treeG);lastTX=1e9;updateTrees(true);return TALL.length}
 const _m4=new THREE.Matrix4(),_q=new THREE.Quaternion(),_Y=new THREE.Vector3(0,1,0),_p=new THREE.Vector3(),_sc=new THREE.Vector3();
-function updateTrees(force){if(!treeG||!TALL.length)return;
+function updateTrees(force){try{updateTrees0(force)}catch(e){killTrees(e)}}
+function updateTrees0(force){if(!treeG||!TALL.length)return;
  if(!force&&Math.hypot(P.x-lastTX,P.z-lastTZ)<40)return;lastTX=P.x;lastTZ=P.z;const R2=TREE_R*TREE_R,near=[];let n=0;
  for(const t of TALL){const dx=t.x-P.x,dz=t.z-P.z,d=dx*dx+dz*dz;if(d<=R2){t.d=d;near.push(t)}}
  near.sort((a,b)=>a.d-b.d);near.length=Math.min(near.length,Math.max(12,Math.floor(TREE_TRIS/TMODEL.tris)));
@@ -370,7 +379,7 @@ tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scen
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
 
 // ===== Chargement des arbres =====
-function loadTrees(){if(SANS||TMODEL)return;
+function loadTrees(){if(SANS||TMODEL||DEAD)return;
  loader.load(TREE_URL,g=>{try{TMODEL=prepTree(g.scene);if(MAP&&!LOST){HT=buildTrees();msg.style.opacity=1;msg.textContent='Arbres : '+HT+' posés · '+TMODEL.tris+' triangles par arbre';setTimeout(()=>msg.style.opacity=0,8000)}}
   catch(e){msg.style.opacity=1;msg.textContent='Arbres : erreur '+e.message}},
   undefined,()=>{msg.style.opacity=1;msg.textContent='Erreur de chargement des arbres : '+TREE_URL})}
@@ -390,5 +399,5 @@ let tPrev=performance.now()/1000;
   P.m.position.set(P.x,P.y,P.z);P.m.rotation.y=P.face;animate(P.m,dt,P.spd);
   npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now);updateTrees(false)}
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
- r.render(scene,cam)})();
+ try{r.render(scene,cam)}catch(e){if(treeG&&!DEAD)killTrees(e);else if(!LOST){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
 </script></body></html>
