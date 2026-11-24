@@ -6,13 +6,18 @@
 html,body{margin:0;height:100%;overflow:hidden;background:#9fc4e8;font-family:system-ui,sans-serif;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 canvas{display:block;touch-action:none}
 #msg{position:fixed;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;color:#fff;background:#000a;border-radius:10px;padding:8px 12px;font-size:13px;transition:opacity .8s;pointer-events:none}
-#top{position:fixed;top:calc(58px + env(safe-area-inset-top));right:10px;display:flex;gap:8px}
+#top{position:fixed;top:calc(58px + env(safe-area-inset-top));right:10px;left:10px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+#insp{position:fixed;top:calc(104px + env(safe-area-inset-top));left:10px;right:10px;background:#000d;color:#fff;border-radius:10px;padding:8px;z-index:5;display:none}
+#ii{margin:0;white-space:pre-wrap;font:12px/1.35 ui-monospace,monospace}
+.ir{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+#it{display:none;width:100%;height:90px;margin-top:6px;font-size:11px;-webkit-user-select:text;user-select:text;box-sizing:border-box}
 button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;padding:8px 12px;font-size:13px}
 #joy{position:fixed;left:50%;bottom:calc(30px + env(safe-area-inset-bottom));width:120px;height:120px;margin-left:-60px;border-radius:50%;border:3px solid #35e0ff;box-shadow:0 0 14px #35e0ff99,inset 0 0 14px #35e0ff55;background:rgba(20,40,70,.35);touch-action:none}
 #knob{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#9fd8ff 45%,#3a7fc0);box-shadow:0 2px 8px #0008;pointer-events:none}
 </style></head><body>
 <div id="msg">Chargement…</div>
-<div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button></div>
+<div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button><button id="bi">Inspecter</button></div>
+<div id="insp"><pre id="ii">Touche un objet de la ville pour voir son nom.</pre><div class="ir"><button id="ih">Masquer</button><button id="in">Même nom</button><button id="im">Même matériau</button></div><div class="ir"><button id="iu">Annuler</button><button id="il">Liste</button></div><textarea id="it" readonly></textarea></div>
 <div id="joy"><div id="knob"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -58,7 +63,7 @@ function turnTo(cur,tgt,k){let d=tgt-cur;while(d>Math.PI)d-=2*Math.PI;while(d<-M
 
 // ===== Ville : new_york_city.glb répété en 3x3 (miroirs = routes qui se raccordent) =====
 const TARGET=350,TILES=3; // largeur d'un bloc en mètres (échelle validée) et nombre de blocs par côté
-let wrap=null,box0=null,s0=1,uf=1,MAP=null;
+let wrap=null,box0=null,s0=1,uf=1,MAP=null,selBox=null;
 try{uf=parseFloat(localStorage.getItem('ny_scale'))||1}catch(e){}
 const SH=11,N=1<<SH,NN=N*N;
 const ortho=new THREE.OrthographicCamera(-1,1,1,-1,.1,100);
@@ -84,25 +89,6 @@ function fillTile(tg,o,info){const t=o.clone(true);tg.add(t);if(!info)return;con
   const M=m4.makeTranslation(a.cx,a.y0,a.cz).multiply(new THREE.Matrix4().makeRotationY(th)).multiply(new THREE.Matrix4().makeTranslation(-b.cx,-b.y0,-b.cz)).multiply(b.mw);
   c.matrix.copy(M);c.matrixAutoUpdate=false;c.matrixWorldNeedsUpdate=true;par.children[a.k].visible=false;tg.add(c)}}
 
-// --- Arbres du fichier : détectés par leur nom (mesh, groupe, matériau) ou par leur forme verte, masqués, positions gardées dans TREES ---
-let TREES=[];window.TREES=TREES;
-function removeTrees(o){
- const re=/tree|arbre|leaf|leaves|foliage|vegetation|plant|bush|shrub|palm|trunk|branch|hedge|conifer|pine|canopy/i,notre=/grass|lawn|road|street|sidewalk|building|ground|terrain/i;
- const meshes=[],b=new THREE.Box3(),v=new THREE.Vector3(),ct=new THREE.Vector3(),names=new Set();
- o.traverse(c=>{if(c.isMesh&&c.geometry)meshes.push(c)});TREES=[];window.TREES=TREES;
- for(const c of meshes){
-  const mats=[].concat(c.material),own=(c.name||'')+' '+mats.map(m=>m&&m.name||'').join(' ');
-  let anc='';for(let p=c.parent;p;p=p.parent)anc+=(p.name||'')+' ';
-  names.add((c.name||'?')+' | '+mats.map(m=>m&&m.name||'?').join(','));
-  b.setFromObject(c);if(b.isEmpty())continue;b.getSize(v);b.getCenter(ct);
-  const hm=v.y*s0,fm=Math.max(v.x,v.z)*s0;
-  let isTree=re.test(own)&&!notre.test(own.replace(re,''));
-  if(!isTree&&re.test(anc)&&fm<40&&hm<40)isTree=true;
-  if(!isTree&&hm>3&&hm<25&&fm<20){ // forme verte : feuillage
-   isTree=mats.some(m=>m&&m.color&&m.color.g>m.color.r*1.12&&m.color.g>m.color.b*1.12&&!(m.map&&m.color.r>.9&&m.color.g>.9))}
-  if(isTree){c.visible=false;TREES.push({x:ct.x,z:ct.z,y:b.min.y,h:v.y,w:Math.max(v.x,v.z),name:c.name||''})}}
- console.log('Arbres retirés :',TREES.length,'| meshes :',[...names].slice(0,80));
- return TREES.length}
 // --- Alentours : tuiles du fichier SANS bâtiments (routes + trottoirs du fichier) + maisons procédurales ---
 const RING=0;                       // nombre d'anneaux de tuiles autour de la ville (1 = 5x5 au total)
 let LOTS=[],houseG=null,outerG=null,HOUSES=[],HGRID=new Map(),EXT=0,TOPS=null;
@@ -174,12 +160,12 @@ function buildMap(){
  ortho.left=-half;ortho.right=half;ortho.top=half;ortho.bottom=-half;ortho.near=.1;ortho.far=sy+30;ortho.updateProjectionMatrix();
  ortho.position.set(0,sy+10,0);ortho.up.set(0,0,-1);ortho.lookAt(0,0,0);ortho.updateMatrixWorld(true);
  const oc=new THREE.Color();r.getClearColor(oc);const oa=r.getClearAlpha(),ob=scene.background,of=scene.fog;
- ground.visible=false;P.m.visible=false;npcGroup.visible=false;if(outerG)outerG.visible=false;if(houseG)houseG.visible=false;scene.background=null;scene.fog=null;scene.overrideMaterial=hmat;
+ ground.visible=false;P.m.visible=false;npcGroup.visible=false;if(outerG)outerG.visible=false;if(houseG)houseG.visible=false;const sbv=selBox?selBox.visible:false;if(selBox)selBox.visible=false;scene.background=null;scene.fog=null;scene.overrideMaterial=hmat;
  r.setClearColor(0x000000,0);r.setRenderTarget(rt);r.render(scene,ortho);
  if(!BUF){BUF=new Uint8Array(NN*4);HH=new Float32Array(NN);HAS=new Uint8Array(NN);WALK=new Uint8Array(NN);SAFE=new Uint8Array(NN);TMP=new Uint8Array(NN);QQ=new Int32Array(NN)}
  r.readRenderTargetPixels(rt,0,0,N,N,BUF);
  r.setRenderTarget(null);scene.overrideMaterial=null;scene.background=ob;scene.fog=of;r.setClearColor(oc,oa);
- ground.visible=true;P.m.visible=true;npcGroup.visible=true;if(outerG)outerG.visible=true;if(houseG)houseG.visible=true;
+ ground.visible=true;P.m.visible=true;npcGroup.visible=true;if(outerG)outerG.visible=true;if(houseG)houseG.visible=true;if(selBox)selBox.visible=sbv;
  const cell=S/N,H=HH,has=HAS,walk=WALK,bins={};walk.fill(0);const rg=sy+2;
  for(let k=0;k<NN;k++){if(BUF[k*4+3]===0){has[k]=0;H[k]=0;continue}has[k]=1;H[k]=((BUF[k*4]+BUF[k*4+1]/255)/255)*rg;const b=Math.round(H[k]/.75);bins[b]=(bins[b]||0)+1}
  let bb=0,bn=-1;for(const b in bins)if(bins[b]>bn){bn=bins[b];bb=+b}
@@ -256,6 +242,36 @@ el.addEventListener('pointermove',e=>{const p=ptrs.get(e.pointerId);if(!p)return
  else if(ptrs.size===2){const a=[...ptrs.values()],d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);if(pd)wantDist=clamp(wantDist*pd/d,2.5,30);pd=d}});
 const cEnd=e=>{ptrs.delete(e.pointerId);pd=0};el.addEventListener('pointerup',cEnd);el.addEventListener('pointercancel',cEnd);
 document.addEventListener('gesturestart',e=>e.preventDefault());
+// ===== Inspecteur d'objets (toucher un objet : nom, matériau, taille ; masquer pour tester) =====
+const rc=new THREE.Raycaster(),ndc=new THREE.Vector2(),$=id=>document.getElementById(id);
+let inspOn=false,sel=null,hid=[],hidLog=[],tap=null,rbT=0;
+const ip=$('insp'),ii=$('ii'),it=$('it');
+const visChain=o=>{for(let p=o;p;p=p.parent)if(!p.visible)return false;return true};
+const tileRoot=m=>{let n=m;while(n&&!(n.parent&&n.parent.parent===wrap))n=n.parent;return n};
+const pathIn=(root,m)=>{const p=[];let n=m;while(n&&n!==root){p.unshift(n.parent.children.indexOf(n));n=n.parent}return n===root?p:null};
+const matNames=m=>[].concat(m.material).map(x=>x&&x.name||'(sans nom)').join(', ');
+function pick3(cx,cy){ndc.set(cx/innerWidth*2-1,-(cy/innerHeight)*2+1);rc.setFromCamera(ndc,cam);
+ for(const h of rc.intersectObject(wrap,true))if(h.object.isMesh&&visChain(h.object))return h.object;return null}
+function select(m){sel=m;const b=new THREE.Box3().setFromObject(m),v=b.getSize(new THREE.Vector3());
+ if(!selBox){selBox=new THREE.Box3Helper(b,0xffff00);selBox.material.depthTest=false;selBox.renderOrder=999;scene.add(selBox)}else selBox.box.copy(b);selBox.visible=true;
+ const root=tileRoot(m),anc=[];for(let p=m.parent,c=0;p&&p!==root&&c<3;p=p.parent,c++)anc.push(p.name||'∅');
+ const col=[].concat(m.material).map(x=>x&&x.color?'#'+x.color.getHexString():'?').join(',');
+ const tri=Math.round((m.geometry.index?m.geometry.index.count:m.geometry.attributes.position.count)/3);
+ ii.textContent='Objet : '+(m.name||'(sans nom)')+'\nGroupes : '+(anc.join(' ‹ ')||'—')+'\nMatériau : '+matNames(m)+' '+col+'\nTaille : '+v.x.toFixed(1)+' × '+v.y.toFixed(1)+' × '+v.z.toFixed(1)+' m · '+tri+' triangles'}
+function rebuild(){clearTimeout(rbT);rbT=setTimeout(()=>{if(wrap&&MAP)buildMap()},60)}
+function applyHide(list,desc){const arr=list.filter(n=>n.visible);if(!arr.length){ii.textContent='Rien à masquer.';return}
+ arr.forEach(n=>n.visible=false);hid.push(arr);hidLog.push(desc);sel=null;if(selBox)selBox.visible=false;ii.textContent='Masqué : '+arr.length+' objet(s). Annuler pour revenir.';rebuild()}
+$('ih').onclick=()=>{if(!sel)return;const root=tileRoot(sel),path=root?pathIn(root,sel):null,out=[];
+ if(path){wrap.children.forEach(tg=>{if(tg===outerG)return;let n=tg.children[0];try{for(const k of path)n=n.children[k];if(n&&n.isMesh)out.push(n)}catch(e){}})}else out.push(sel);
+ applyHide(out,'UN : nom="'+sel.name+'" matériau="'+matNames(sel)+'" chemin=['+(path||[])+']')};
+$('in').onclick=()=>{if(!sel||!sel.name){ii.textContent='Cet objet n\'a pas de nom.';return}const out=[];wrap.traverse(c=>{if(c.isMesh&&c.name===sel.name&&visChain(c))out.push(c)});applyHide(out,'NOM : "'+sel.name+'"')};
+$('im').onclick=()=>{if(!sel)return;const ms=[].concat(sel.material),out=[];wrap.traverse(c=>{if(c.isMesh&&visChain(c)&&[].concat(c.material).some(x=>ms.includes(x)))out.push(c)});applyHide(out,'MATÉRIAU : "'+matNames(sel)+'"')};
+$('iu').onclick=()=>{const a=hid.pop();if(!a){ii.textContent='Rien à annuler.';return}a.forEach(n=>n.visible=true);hidLog.pop();ii.textContent='Annulé ('+a.length+' objet(s) remis).';rebuild()};
+$('il').onclick=()=>{const t=hidLog.length?hidLog.join('\n'):'(aucun objet masqué)';it.style.display='block';it.value=t;it.select();try{navigator.clipboard.writeText(t)}catch(e){}};
+$('bi').onclick=()=>{inspOn=!inspOn;ip.style.display=inspOn?'block':'none';$('bi').textContent=inspOn?'Inspecter ✓':'Inspecter';if(!inspOn&&selBox)selBox.visible=false};
+el.addEventListener('pointerdown',e=>{tap=(inspOn&&ptrs.size===1)?{x:e.clientX,y:e.clientY,t:performance.now()}:null});
+el.addEventListener('pointerup',e=>{if(!inspOn||!tap)return;const d=Math.hypot(e.clientX-tap.x,e.clientY-tap.y);
+ if(d<10&&performance.now()-tap.t<500){const m=pick3(e.clientX,e.clientY);if(m)select(m)}tap=null});
 function setScale(f){uf=Math.min(6,Math.max(.15,uf*f));try{localStorage.setItem('ny_scale',uf)}catch(e){}if(wrap){buildMap();spawn()}}
 document.getElementById('bm').onclick=()=>setScale(.8);document.getElementById('bp').onclick=()=>setScale(1.25);
 document.getElementById('bs').onclick=()=>{if(MAP)spawn()};
@@ -277,7 +293,7 @@ function start(o){
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;o.updateMatrixWorld(true);
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
- const NT=removeTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
+ const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  for(let i=0;i<TILES;i++)for(let j=0;j<TILES;j++){const tg=new THREE.Group();
   tg.position.set((i-cc)*sz.x,0,(j-cc)*sz.z);tg.scale.set(Math.abs(i-cc)%2?-1:1,1,Math.abs(j-cc)%2?-1:1);
@@ -288,7 +304,7 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);
  scene.add(wrap);buildMap();spawn();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres retirés : '+NT;
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra';
  setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
