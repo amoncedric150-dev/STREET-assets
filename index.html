@@ -112,12 +112,14 @@ function fillTile(tg,o,info){const t=o.clone(true);tg.add(t);if(!info)return;con
   c.matrix.copy(M);c.matrixAutoUpdate=false;c.matrixWorldNeedsUpdate=true;par.children[a.k].visible=false;tg.add(c)}}
 
 // --- Nouveaux arbres (tree_animate.glb) posés aux emplacements des anciens ; seuls ceux proches du joueur sont dessinés ---
-const TREE_URL=R2+'tree_animate.glb',TREE_R=240;
+const TREE_URL=R2+'tree_animate.glb',TREE_R=110,TREE_TRIS=120000; // TREE_TRIS = budget de triangles d'arbres affichés en même temps
 let TMODEL=null,treeG=null,TALL=[],lastTX=1e9,lastTZ=1e9,HT=0;
 function prepTree(root){root.updateMatrixWorld(true);const parts=[],box=new THREE.Box3();
- root.traverse(c=>{if(!c.isMesh||!c.geometry)return;const g=c.geometry.clone();g.deleteAttribute('skinIndex');g.deleteAttribute('skinWeight');g.applyMatrix4(c.matrixWorld);g.computeBoundingBox();box.union(g.boundingBox);parts.push({geo:g,mat:c.material})});
+ let tris=0;
+ root.traverse(c=>{if(!c.isMesh||!c.geometry)return;const g=c.geometry.clone();tris+=(g.index?g.index.count:g.attributes.position.count)/3;
+  [].concat(c.material).forEach(m=>{if(m&&m.map&&m.transparent){m.transparent=false;m.alphaTest=Math.max(m.alphaTest||0,.5);m.depthWrite=true}if(m)m.side=THREE.DoubleSide});g.deleteAttribute('skinIndex');g.deleteAttribute('skinWeight');g.applyMatrix4(c.matrixWorld);g.computeBoundingBox();box.union(g.boundingBox);parts.push({geo:g,mat:c.material})});
  const ct=box.getCenter(new THREE.Vector3());parts.forEach(p=>p.geo.translate(-ct.x,-box.min.y,-ct.z));
- return{parts,H:Math.max(.001,box.max.y-box.min.y)}}
+ return{parts,tris:Math.max(1,Math.round(tris)),H:Math.max(.001,box.max.y-box.min.y)}}
 function buildTrees(){
  if(treeG){scene.remove(treeG);treeG.traverse(o=>{if(o.isInstancedMesh)o.dispose()})}
  treeG=new THREE.Group();TALL=[];if(!TMODEL||!TREEPOS.length||!MAP)return 0;
@@ -130,8 +132,10 @@ function buildTrees(){
  scene.add(treeG);lastTX=1e9;updateTrees(true);return TALL.length}
 const _m4=new THREE.Matrix4(),_q=new THREE.Quaternion(),_Y=new THREE.Vector3(0,1,0),_p=new THREE.Vector3(),_sc=new THREE.Vector3();
 function updateTrees(force){if(!treeG||!TALL.length)return;
- if(!force&&Math.hypot(P.x-lastTX,P.z-lastTZ)<40)return;lastTX=P.x;lastTZ=P.z;const R2=TREE_R*TREE_R;let n=0;
- for(const t of TALL){const dx=t.x-P.x,dz=t.z-P.z;if(dx*dx+dz*dz>R2)continue;
+ if(!force&&Math.hypot(P.x-lastTX,P.z-lastTZ)<40)return;lastTX=P.x;lastTZ=P.z;const R2=TREE_R*TREE_R,near=[];let n=0;
+ for(const t of TALL){const dx=t.x-P.x,dz=t.z-P.z,d=dx*dx+dz*dz;if(d<=R2){t.d=d;near.push(t)}}
+ near.sort((a,b)=>a.d-b.d);near.length=Math.min(near.length,Math.max(8,Math.floor(TREE_TRIS/TMODEL.tris)));
+ for(const t of near){
   _m4.compose(_p.set(t.x,t.y,t.z),_q.setFromAxisAngle(_Y,t.ry),_sc.setScalar(t.h/TMODEL.H));
   treeG.children.forEach(im=>im.setMatrixAt(n,_m4));n++}
  treeG.children.forEach(im=>{im.count=n;im.instanceMatrix.needsUpdate=true})}
@@ -351,13 +355,16 @@ function start(o){
  wrap.add(outerG);
  scene.add(wrap);buildMap();spawn();
  msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT;
- setTimeout(()=>msg.style.opacity=0,7000)}
+ setTimeout(()=>msg.style.opacity=0,7000);setTimeout(loadTrees,2500)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
 
 // ===== Chargement des arbres =====
-loader.load(TREE_URL,g=>{TMODEL=prepTree(g.scene);if(MAP){HT=buildTrees();msg.style.opacity=1;msg.textContent='Arbres posés : '+HT+' (sur '+TREEPOS.length+' par tuile)';setTimeout(()=>msg.style.opacity=0,6000)}},
- undefined,()=>{msg.style.opacity=1;msg.textContent='Erreur de chargement des arbres : '+TREE_URL});
+function loadTrees(){if(TMODEL)return;
+ loader.load(TREE_URL,g=>{try{TMODEL=prepTree(g.scene);if(MAP){HT=buildTrees();msg.style.opacity=1;msg.textContent='Arbres : '+HT+' posés · '+TMODEL.tris+' triangles par arbre';setTimeout(()=>msg.style.opacity=0,8000)}}
+  catch(e){msg.style.opacity=1;msg.textContent='Arbres : erreur '+e.message}},
+  undefined,()=>{msg.style.opacity=1;msg.textContent='Erreur de chargement des arbres : '+TREE_URL})}
+r.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();msg.style.opacity=1;msg.textContent='Mémoire graphique saturée : recharge la page (trop d\'arbres ou modèle trop lourd)'});
 // ===== Boucle =====
 onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
 let tPrev=performance.now()/1000;
