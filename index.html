@@ -25,6 +25,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none
 <div class="btn" id="bJump">Saut</div><div class="btn" id="bSprint">Sprint</div>
 <div id="bDbg">🔍</div><div id="dbg"></div>
 <script>
+/* diagnostic : affiche tout de suite la version et la moindre erreur à l'écran */
+const VERSION="v4";
+(function(){const t=document.getElementById("lt");t.textContent="Démarrage ("+VERSION+")…";
+  window.addEventListener("error",e=>{t.textContent="Erreur "+VERSION+" : "+(e.message||"inconnue")+(e.lineno?" (ligne "+e.lineno+")":"");});
+  if(typeof BABYLON==="undefined"){t.textContent="Erreur "+VERSION+" : Babylon.js n'a pas pu se charger (connexion ou CDN bloqué).";}
+  else if(!BABYLON.SceneLoader||!BABYLON.GLTFFileLoader&&!BABYLON.SceneLoader.IsPluginForExtensionAvailable(".glb")){t.textContent="Erreur "+VERSION+" : le chargeur de modèles .glb n'a pas pu se charger.";}})();
 /* ===================== RÉGLAGES (à modifier ici) ===================== */
 const BASE="./models/"; // les 3 modèles sont dans le dossier models/ de ton dépôt
 const MODELS={
@@ -239,7 +245,7 @@ addEventListener("unhandledrejection",e=>{$("lt").textContent="Erreur : "+((e.re
     for(let j=0;j<M3.copies;j++)l3.push([hx1-z.w/2,-tz/2+z.d/2+j*(z.d+GAP)]);
     place(z,l3);z.cx=hx1-z.w/2;z.cz=0;zones.hk=z;addRect("hk",hx1-z.w,hx1,-tz/2,tz/2);stage++;
     // routes
-    setBar(1,"Construction des routes…");await new Promise(r=>setTimeout(r,30));
+    setBar(1,"Construction des routes… ("+VERSION+")");await new Promise(r=>setTimeout(r,30));
     B=buildRoads();buildDbg();teleport(B.roadE,0);camYaw=-Math.PI/2;
     $("load").style.display="none";
     let last=performance.now();
