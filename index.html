@@ -16,10 +16,10 @@ button.off{opacity:.4}
 <script>
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x9fc4e8);scene.fog=new THREE.Fog(0x9fc4e8,400,1800);
 const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.5,4000);
-const r=new THREE.WebGLRenderer({antialias:true});r.setPixelRatio(Math.min(devicePixelRatio,2));r.setSize(innerWidth,innerHeight);
+const r=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});r.setPixelRatio(1);r.setSize(innerWidth,innerHeight);
 r.outputEncoding=THREE.sRGBEncoding;document.body.prepend(r.domElement);
-scene.add(new THREE.HemisphereLight(0xffffff,0x667788,1.1));
-const sun=new THREE.DirectionalLight(0xfff2dd,1.4);sun.position.set(200,400,150);scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xffffff,0x667788,0.7));
+const sun=new THREE.DirectionalLight(0xfff2dd,0.9);sun.position.set(200,400,150);scene.add(sun);
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x555a5e,roughness:1}));
 ground.rotation.x=-Math.PI/2;ground.position.y=-0.2;scene.add(ground);
 // ===== Petite ville : 4 modèles assemblés =====
@@ -50,15 +50,20 @@ function place(o,{size,cx,cz,rotY=0,maxScale=Infinity}){o.rotation.y=rotY;o.upda
 const items=[
  {f:'new_york_city.glb',n:'New York',opt:{size:Q,cx:QC,cz:-QC}},
  {f:'Untitled.glb',n:'Bâtiments',opt:{size:Q*.9,cx:-QC,cz:-QC,maxScale:1.2}},
- {f:'city.glb',n:'Rue',opt:{size:Q,cx:-QC,cz:QC,rotY:Math.PI/2}},
+ {f:'city.glb',n:'Rue',tex:256,opt:{size:Q,cx:-QC,cz:QC,rotY:Math.PI/2}},
  {f:'traffic_slam_2_map.glb',n:'Carte',re:/collision|invisiblewall|lightmap|sea|water|ocean/i,opt:{size:Q,cx:QC,cz:QC}}];
-let left=items.length;
+function shrink(root,max){const seen=new Set();root.traverse(o=>{if(!o.isMesh)return;[].concat(o.material).forEach(m=>{for(const k in m){const t=m[k];
+ if(t&&t.isTexture&&!seen.has(t)){seen.add(t);const im=t.image;
+  if(im&&im.width>max){const c=document.createElement('canvas');c.width=max;c.height=Math.max(1,Math.round(im.height*max/im.width));
+   c.getContext('2d').drawImage(im,0,0,c.width,c.height);if(im.close)im.close();t.image=c;t.needsUpdate=true}}}})})}
 function tryLoad(urls,onok,onerr,onprog){const u=urls.shift();loader.load(u,onok,onprog,()=>urls.length?tryLoad(urls,onok,onerr,onprog):onerr(u))}
-items.forEach(it=>{addBtn(it.n,()=>it.obj);
- tryLoad([R2+it.f,base+'Models/'+it.f],g=>{const o=g.scene;clean(o,it.re);place(o,it.opt);scene.add(o);it.obj=o;
-  if(--left==0)msg.textContent='Glisse = tourner · 2 doigts = zoom/déplacer'},
-  u=>{msg.textContent='Erreur de chargement : '+u+' (CORS ou fichier absent ?)'},
-  e=>{if(e.total)msg.textContent='Chargement '+it.n+' '+Math.round(e.loaded/e.total*100)+'%'})});
+items.forEach(it=>addBtn(it.n,()=>it.obj));
+function next(i){if(i>=items.length){msg.textContent='Glisse = tourner · 2 doigts = zoom/déplacer';return}
+ const it=items[i];
+ tryLoad([R2+it.f,base+'Models/'+it.f],g=>{const o=g.scene;clean(o,it.re);shrink(o,it.tex||512);place(o,it.opt);scene.add(o);it.obj=o;next(i+1)},
+  u=>{msg.textContent='Erreur de chargement : '+u;next(i+1)},
+  e=>{if(e.total)msg.textContent='Chargement '+it.n+' ('+(i+1)+'/'+items.length+') '+Math.round(e.loaded/e.total*100)+'%'})}
+next(0);
 // Contrôles tactiles
 let th=0.6,ph=1.0,dist=380;const tg=new THREE.Vector3(0,0,0);let pts=new Map(),last=0,lc=null;
 const el=r.domElement;
