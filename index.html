@@ -33,7 +33,7 @@ const loader=new THREE.GLTFLoader();let base=location.href.split('?')[0].split('
 
 // ===== Utilitaires de chargement (identiques à avant) =====
 function clean(root){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push(o)});k.forEach(o=>o.parent&&o.parent.remove(o));
- root.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&m.transparent&&m.opacity===0)m.visible=false})})}
+ root.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&((m.transparent&&m.opacity<.15)||m.colorWrite===false))m.visible=false})})}
 function lighten(o){const v=new THREE.Vector3();o.traverse(c=>{if(!c.isMesh||!c.geometry)return;
  const g=c.geometry,tri=(g.index?g.index.count:g.attributes.position.count)/3;
  if(tri>8000){g.computeBoundingBox();g.boundingBox.getSize(v);if(v.length()<10)c.visible=false}});
@@ -58,7 +58,7 @@ function turnTo(cur,tgt,k){let d=tgt-cur;while(d>Math.PI)d-=2*Math.PI;while(d<-M
 
 // ===== Ville : new_york_city.glb répété en 3x3 (miroirs = routes qui se raccordent) =====
 const TARGET=350,TILES=3; // largeur d'un bloc en mètres (échelle validée) et nombre de blocs par côté
-let wrap=null,box0=null,s0=1,uf=1,MAP=null,sky=null;
+let wrap=null,box0=null,s0=1,uf=1,MAP=null;
 try{uf=parseFloat(localStorage.getItem('ny_scale'))||1}catch(e){}
 const SH=11,N=1<<SH,NN=N*N;
 const ortho=new THREE.OrthographicCamera(-1,1,1,-1,.1,100);
@@ -84,17 +84,70 @@ function fillTile(tg,o,info){const t=o.clone(true);tg.add(t);if(!info)return;con
   const M=m4.makeTranslation(a.cx,a.y0,a.cz).multiply(new THREE.Matrix4().makeRotationY(th)).multiply(new THREE.Matrix4().makeTranslation(-b.cx,-b.y0,-b.cz)).multiply(b.mw);
   c.matrix.copy(M);c.matrixAutoUpdate=false;c.matrixWorldNeedsUpdate=true;par.children[a.k].visible=false;tg.add(c)}}
 
-// --- Skyline lointain (cubes en un seul appel de dessin, noyés dans la brume) ---
-function placeSky(halfCity){
- if(!sky){sky=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1).translate(0,.5,0),new THREE.MeshStandardMaterial({roughness:1}),320);sky.frustumCulled=false;scene.add(sky)}
- const m=new THREE.Matrix4(),q=new THREE.Quaternion(),c=new THREE.Color();let k=0;const R=halfCity+1300;
- while(k<320){const x=(Math.random()*2-1)*R,z=(Math.random()*2-1)*R;if(Math.abs(x)<halfCity+60&&Math.abs(z)<halfCity+60)continue;
-  const w=30+Math.random()*50,h=40+Math.pow(Math.random(),2)*260,d=30+Math.random()*50;
-  q.setFromAxisAngle(new THREE.Vector3(0,1,0),Math.random()*3);m.compose(new THREE.Vector3(x,MAP?MAP.g-.3:0,z),q,new THREE.Vector3(w,h,d));
-  sky.setMatrixAt(k,m);c.setHSL(.58,.12,.42+Math.random()*.25);sky.setColorAt(k,c);k++}
- sky.instanceMatrix.needsUpdate=true;sky.instanceColor.needsUpdate=true}
+// --- Alentours : tuiles du fichier SANS bâtiments (routes + trottoirs du fichier) + maisons procédurales ---
+const RING=1;                       // nombre d'anneaux de tuiles autour de la ville (1 = 5x5 au total)
+let LOTS=[],houseG=null,outerG=null,HOUSES=[],HGRID=new Map(),EXT=0,TOPS=null;
+const HC=10; // taille des cases de la grille de collision des maisons (m)
+function findLots(o,sz){ // empreintes des bâtiments du fichier (repère de la tuile, échelle 1)
+ const lim=Math.max(sz.x,sz.z),L=[],meshes=[],hide=[],b=new THREE.Box3(),v=new THREE.Vector3(),ct=new THREE.Vector3();
+ o.traverse(c=>{if(c.isMesh&&c.geometry)meshes.push(c)});
+ meshes.forEach((c,idx)=>{let vis=true;for(let p=c;p;p=p.parent)if(!p.visible){vis=false;break}if(!vis)return;
+  b.setFromObject(c);if(b.isEmpty())return;b.getSize(v);b.getCenter(ct);
+  if(v.y>lim*.022&&Math.max(v.x,v.z)<=lim*.35&&Math.min(v.x,v.z)>lim*.012){hide.push(idx);L.push({cx:ct.x,cz:ct.z,w:v.x,d:v.z,a:v.x*v.z})}});
+ L.sort((p,q)=>q.a-p.a);const keep=[];
+ for(const l of L){let cov=0;for(const k of keep){const ox=Math.min(l.cx+l.w/2,k.cx+k.w/2)-Math.max(l.cx-l.w/2,k.cx-k.w/2),oz=Math.min(l.cz+l.d/2,k.cz+k.d/2)-Math.max(l.cz-l.d/2,k.cz-k.d/2);
+   if(ox>0&&oz>0)cov+=ox*oz;if(cov>l.a*.6)break}
+  if(cov<=l.a*.6)keep.push(l)}
+ return{lots:keep,hide}}
+function roadOnlyTile(o,hide){const t=o.clone(true),m=[];t.traverse(c=>{if(c.isMesh&&c.geometry)m.push(c)});
+ hide.forEach(i=>{if(m[i])m[i].visible=false});return t}
+function addHouseRect(x,z,w,d,h){const r={x0:x-w/2,x1:x+w/2,z0:z-d/2,z1:z+d/2,h};HOUSES.push(r);
+ for(let i=Math.floor(r.x0/HC);i<=Math.floor(r.x1/HC);i++)for(let j=Math.floor(r.z0/HC);j<=Math.floor(r.z1/HC);j++){const key=i+','+j;let a=HGRID.get(key);if(!a){a=[];HGRID.set(key,a)}a.push(r)}}
+function houseAt(x,z,m){const a=HGRID.get(Math.floor(x/HC)+','+Math.floor(z/HC));if(!a)return null;
+ for(const r of a)if(x>r.x0-m&&x<r.x1+m&&z>r.z0-m&&z<r.z1+m)return r;return null}
+const HCOL=[0xe8dcc8,0xd9c7a6,0xc9d6dd,0xe4c9c0,0xb8c7a8,0xd8d0c0,0xcdb6a0,0xe9e4da,0xa9b9c9,0xd0a890];
+const ROOFC=[0x7a3b2e,0x5a4a42,0x3f4650,0x8a5a3a,0x4a3a36];
+function buildHouses(){
+ if(houseG){scene.remove(houseG);houseG.traverse(o=>{if(o.isMesh)o.geometry.dispose()})}
+ houseG=new THREE.Group();HOUSES=[];HGRID=new Map();
+ if(!LOTS.length||!MAP){return 0}
+ const s=s0*uf,tw=box0.x*s,td=box0.z*s,g=MAP.g-.3,M=[],GAP=2.5;
+ const cc=(TILES-1)/2,R=(TILES-1)/2+RING;EXT=(TILES/2+RING)*Math.max(tw,td);
+ for(let i=-R;i<=R;i++)for(let j=-R;j<=R;j++){
+  if(Math.abs(i)<=cc&&Math.abs(j)<=cc)continue; // le centre reste New York
+  const sx=Math.abs(i)%2?-1:1,sz=Math.abs(j)%2?-1:1,tx=i*tw,tz=j*td;
+  for(const l of LOTS){const W=l.w*s,D=l.d*s,X=tx+sx*l.cx*s,Z=tz+sz*l.cz*s;
+   const nx=Math.max(1,Math.round(W/13)),nz=Math.max(1,Math.round(D/12));
+   for(let a=0;a<nx;a++)for(let b=0;b<nz;b++){
+    if(nx*nz>1&&Math.random()<.08)continue;
+    const cw=W/nx,cd=D/nz,w=Math.min(15,cw-GAP),d=Math.min(14,cd-GAP);if(w<5||d<5)continue;
+    const x=X-W/2+cw*(a+.5),z=Z-D/2+cd*(b+.5),h=4.5+Math.random()*3.5+(Math.random()<.2?3:0),rh=1.8+Math.random()*1.6;
+    M.push({x,z,w,d,h,rh,c:pick(HCOL),rc:pick(ROOFC),ry:Math.random()<.5?0:Math.PI/2});
+    addHouseRect(x,z,w,d,h+rh)}}}
+ const n=M.length;if(!n){return 0}
+ const body=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1).translate(0,.5,0),new THREE.MeshStandardMaterial({roughness:.95}),n);
+ const roof=new THREE.InstancedMesh(new THREE.ConeGeometry(.5*Math.SQRT2,1,4).rotateY(Math.PI/4).translate(0,.5,0),new THREE.MeshStandardMaterial({roughness:.9}),n);
+ const m4=new THREE.Matrix4(),q=new THREE.Quaternion(),Y=new THREE.Vector3(0,1,0),col=new THREE.Color();
+ M.forEach((h,k)=>{q.identity();
+  m4.compose(new THREE.Vector3(h.x,g,h.z),q,new THREE.Vector3(h.w,h.h,h.d));body.setMatrixAt(k,m4);body.setColorAt(k,col.setHex(h.c));
+  m4.compose(new THREE.Vector3(h.x,g+h.h,h.z),q,new THREE.Vector3(h.w*1.08,h.rh,h.d*1.08));roof.setMatrixAt(k,m4);roof.setColorAt(k,col.setHex(h.rc))});
+ body.frustumCulled=false;roof.frustumCulled=false;houseG.add(body,roof);scene.add(houseG);return n}
 
-// Carte des hauteurs vue du dessus (sol, collisions, caméra)
+// Ouverture morphologique (érosion puis dilatation, rayon r cellules) : retire de OB tout ce qui est plus fin que ~2r cellules
+const LINE=new Int32Array(N+1);
+function pass1(m,r,vert,erode){for(let a=0;a<N;a++){LINE[0]=0;
+  for(let t=0;t<N;t++)LINE[t+1]=LINE[t]+m[vert?t*N+a:a*N+t];
+  for(let t=0;t<N;t++){const lo=Math.max(0,t-r),hi=Math.min(N,t+r+1),c=LINE[hi]-LINE[lo];
+   m[vert?t*N+a:a*N+t]=erode?(t-r<0||t+r>=N?0:(c===2*r+1?1:0)):(c>0?1:0)}}}
+let OPEN_TMP=null;
+function openMask(m,r){ // m modifié sur place
+ if(!OPEN_TMP)OPEN_TMP=new Uint8Array(NN);
+ // érosion
+ pass1(m,r,false,true);pass1(m,r,true,true);
+ // dilatation
+ pass1(m,r,false,false);pass1(m,r,true,false)}
+let HN=0;
+// Carte des hauteurs (sol, collisions, caméra)
 function buildMap(){
  const s=s0*uf;wrap.scale.setScalar(s);wrap.updateMatrixWorld(true);
  const W=box0.x*TILES*s,D=box0.z*TILES*s,sy=box0.y*s,S=Math.max(W,D)+4,half=S/2;
@@ -102,39 +155,46 @@ function buildMap(){
  ortho.left=-half;ortho.right=half;ortho.top=half;ortho.bottom=-half;ortho.near=.1;ortho.far=sy+30;ortho.updateProjectionMatrix();
  ortho.position.set(0,sy+10,0);ortho.up.set(0,0,-1);ortho.lookAt(0,0,0);ortho.updateMatrixWorld(true);
  const oc=new THREE.Color();r.getClearColor(oc);const oa=r.getClearAlpha(),ob=scene.background,of=scene.fog;
- ground.visible=false;P.m.visible=false;npcGroup.visible=false;if(sky)sky.visible=false;scene.background=null;scene.fog=null;scene.overrideMaterial=hmat;
+ ground.visible=false;P.m.visible=false;npcGroup.visible=false;if(outerG)outerG.visible=false;if(houseG)houseG.visible=false;scene.background=null;scene.fog=null;scene.overrideMaterial=hmat;
  r.setClearColor(0x000000,0);r.setRenderTarget(rt);r.render(scene,ortho);
  if(!BUF){BUF=new Uint8Array(NN*4);HH=new Float32Array(NN);HAS=new Uint8Array(NN);WALK=new Uint8Array(NN);SAFE=new Uint8Array(NN);TMP=new Uint8Array(NN);QQ=new Int32Array(NN)}
  r.readRenderTargetPixels(rt,0,0,N,N,BUF);
  r.setRenderTarget(null);scene.overrideMaterial=null;scene.background=ob;scene.fog=of;r.setClearColor(oc,oa);
- ground.visible=true;P.m.visible=true;npcGroup.visible=true;if(sky)sky.visible=true;
+ ground.visible=true;P.m.visible=true;npcGroup.visible=true;if(outerG)outerG.visible=true;if(houseG)houseG.visible=true;
  const cell=S/N,H=HH,has=HAS,walk=WALK,bins={};walk.fill(0);const rg=sy+2;
- for(let k=0;k<NN;k++){if(BUF[k*4+3]===0){has[k]=0;continue}has[k]=1;H[k]=((BUF[k*4]+BUF[k*4+1]/255)/255)*rg;const b=Math.round(H[k]/.75);bins[b]=(bins[b]||0)+1}
+ for(let k=0;k<NN;k++){if(BUF[k*4+3]===0){has[k]=0;H[k]=0;continue}has[k]=1;H[k]=((BUF[k*4]+BUF[k*4+1]/255)/255)*rg;const b=Math.round(H[k]/.75);bins[b]=(bins[b]||0)+1}
  let bb=0,bn=-1;for(const b in bins)if(bins[b]>bn){bn=bins[b];bb=+b}
  const g=bb*.75;
- // Zone marchable = tout ce qui est relié au niveau de la rue par des pentes douces / marches (< 0,6 m par cellule)
- let qt=0,qh=0;
- for(let k=0;k<NN;k++)if(has[k]&&Math.abs(H[k]-g)<=.9){walk[k]=1;QQ[qt++]=k}
- const lo=g-4,hi=g+6;
- while(qh<qt){const k=QQ[qh++],i=k&(N-1),j=k>>SH,h=H[k];
-  for(let d=0;d<4;d++){let nk;
-   if(d===0){if(i===0)continue;nk=k-1}else if(d===1){if(i===N-1)continue;nk=k+1}else if(d===2){if(j===0)continue;nk=k-N}else{if(j===N-1)continue;nk=k+N}
-   if(walk[nk]||!has[nk])continue;const hn=H[nk];if(hn<lo||hn>hi||Math.abs(hn-h)>.6)continue;walk[nk]=1;QQ[qt++]=nk}}
- const wc=qt;
+ // Obstacles = volumes hauts ET épais (bâtiments, arbres). Tout ce qui est fin (feux, câbles, potences, murs invisibles) est ignoré,
+ // les objets bas (voitures, bornes) sont traversables, et les trous de la carte sont marchables : les routes sont libres.
+ const TALL=g+2,OB=TMP;let wc=0;
+ for(let k=0;k<NN;k++)OB[k]=(has[k]&&H[k]>TALL)?1:0;
+ openMask(OB,3);
+ if(!TOPS)TOPS=new Float32Array(NN);const GHt=TOPS;
+ for(let k=0;k<NN;k++){
+  if(!has[k]){GHt[k]=g;walk[k]=1;wc++;continue}
+  const h=H[k];
+  if(OB[k]){GHt[k]=g;walk[k]=0;continue}
+  if(h<g-1.5){GHt[k]=g;walk[k]=0;continue}
+  GHt[k]=(Math.abs(h-g)<=.7)?h:g;walk[k]=1;wc++}
  // Cellules "sûres" (1 m de marge) pour faire apparaître le joueur et les PNJ
  TMP.fill(0);SAFE.fill(0);
  for(let j=0;j<N;j++){const row=j*N;for(let i=2;i<N-2;i++)TMP[row+i]=walk[row+i-2]&walk[row+i-1]&walk[row+i]&walk[row+i+1]&walk[row+i+2]}
  let ns=0;for(let j=2;j<N-2;j++){const row=j*N;for(let i=0;i<N;i++){const v=TMP[row-2*N+i]&TMP[row-N+i]&TMP[row+i]&TMP[row+N+i]&TMP[row+2*N+i];SAFE[row+i]=v;ns+=v}}
  const list=new Int32Array(ns);let p=0;for(let k=0;k<NN;k++)if(SAFE[k])list[p++]=k;
- MAP={cell,x0:-half,z0:half,H,has,walk,safe:SAFE,list,g,free:wc<50||ns<10,W,D,sy};
- ground.position.y=g-.3;placeSky(Math.max(W,D)/2)
+ MAP={cell,x0:-half,z0:half,H,GH:GHt,has,walk,safe:SAFE,list,g,free:wc<50||ns<10,W,D,sy};
+ ground.position.y=g-.3;HN=buildHouses()
 }
 function cellAt(x,z){const i=Math.floor((x-MAP.x0)/MAP.cell),j=Math.floor((MAP.z0-z)/MAP.cell);return(i<0||j<0||i>=N||j>=N)?-1:j*N+i}
 function cellXZ(k){const i=k&(N-1),j=k>>SH;return[MAP.x0+(i+.5)*MAP.cell,MAP.z0-(j+.5)*MAP.cell]}
 const OFF=[[0,0],[.3,0],[-.3,0],[0,.3],[0,-.3]];
-function canStand(x,z){if(MAP.free)return true;for(const o of OFF){const k=cellAt(x+o[0],z+o[1]);if(k<0||!MAP.walk[k])return false}return true}
-function groundAt(x,z){const k=cellAt(x,z);return(k>=0&&MAP.walk[k])?MAP.H[k]:MAP.g}
-function topAt(x,z){const k=cellAt(x,z);return(k>=0&&MAP.has[k])?MAP.H[k]:-1e9}
+function canStand(x,z){if(MAP.free)return true;
+ for(const o of OFF){const px=x+o[0],pz=z+o[1],k=cellAt(px,pz);
+  if(k>=0){if(!MAP.walk[k])return false}
+  else{if(Math.abs(px)>EXT||Math.abs(pz)>EXT)return false;if(houseAt(px,pz,0))return false}}
+ return true}
+function groundAt(x,z){const k=cellAt(x,z);return k>=0?MAP.GH[k]:MAP.g}
+function topAt(x,z){const k=cellAt(x,z);if(k>=0)return MAP.has[k]?MAP.H[k]:-1e9;const h=houseAt(x,z,0);return h?MAP.g+h.h:-1e9}
 
 // ===== Joueur + PNJ =====
 const P={m:makeHuman(0xd8412f,0x2b3a55,0xe0b48f),x:0,y:0,z:0,face:0,spd:0};scene.add(P.m);
@@ -198,13 +258,18 @@ function start(o){
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;o.updateMatrixWorld(true);
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
- const info=makeSlots(o,sz);lighten(o);
+ const info=makeSlots(o,sz);lighten(o);const FL=findLots(o,sz);LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  for(let i=0;i<TILES;i++)for(let j=0;j<TILES;j++){const tg=new THREE.Group();
   tg.position.set((i-cc)*sz.x,0,(j-cc)*sz.z);tg.scale.set(Math.abs(i-cc)%2?-1:1,1,Math.abs(j-cc)%2?-1:1);
   if(i===cc&&j===cc)tg.add(o);else fillTile(tg,o,info);wrap.add(tg)}
+ outerG=new THREE.Group();const R=cc+RING;
+ for(let i=-R;i<=R;i++)for(let j=-R;j<=R;j++){if(Math.abs(i)<=cc&&Math.abs(j)<=cc)continue;
+  const tg=new THREE.Group();tg.position.set(i*sz.x,0,j*sz.z);tg.scale.set(Math.abs(i)%2?-1:1,1,Math.abs(j)%2?-1:1);
+  tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
+ wrap.add(outerG);
  scene.add(wrap);buildMap();spawn();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra';
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · maisons : '+HN;
  setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
