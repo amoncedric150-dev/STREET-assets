@@ -40,6 +40,9 @@ const loader=new THREE.GLTFLoader();let base=location.href.split('?')[0].split('
 function clean(root){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push(o)});k.forEach(o=>o.parent&&o.parent.remove(o));
  root.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&((m.transparent&&m.opacity<.15)||m.colorWrite===false))m.visible=false})})}
 // Arbres du fichier : un seul gros mesh de feuilles (matériaux « FoliageTrees… ») et un d'écorce (« CityGenBark… ») par tuile
+const SANS=/sanstrees/i.test(location.search); // ouvrir la page avec ?sanstrees pour désactiver les nouveaux arbres
+let LOST=false;
+addEventListener('error',e=>{if(!LOST){msg.style.opacity=1;msg.textContent='Erreur : '+e.message+' (ligne '+e.lineno+')'}});
 const TREE_MAT=/^(FoliageTrees|CityGenBark)/i;
 const BARK_MAT=/^CityGenBark/i;
 let TREEPOS=[]; // arbres d'origine : {lx,lz,ly,h} dans le repère de la tuile (échelle 1)
@@ -112,11 +115,18 @@ function fillTile(tg,o,info){const t=o.clone(true);tg.add(t);if(!info)return;con
   c.matrix.copy(M);c.matrixAutoUpdate=false;c.matrixWorldNeedsUpdate=true;par.children[a.k].visible=false;tg.add(c)}}
 
 // --- Nouveaux arbres (tree_animate.glb) posés aux emplacements des anciens ; seuls ceux proches du joueur sont dessinés ---
-const TREE_URL=R2+'tree_animate.glb',TREE_R=110,TREE_TRIS=120000; // TREE_TRIS = budget de triangles d'arbres affichés en même temps
+const TREE_URL=R2+'tree_animate.glb',TREE_R=110,TREE_TRIS=200000; // TREE_TRIS = budget de triangles d'arbres affichés en même temps
 let TMODEL=null,treeG=null,TALL=[],lastTX=1e9,lastTZ=1e9,HT=0;
+function shrinkTex(t,max){if(!t||!t.image)return t;const im=t.image,w=im.width||im.naturalWidth,h=im.height||im.naturalHeight;
+ if(!w||(w<=max&&h<=max))return t;const k=max/Math.max(w,h),c=document.createElement('canvas');c.width=Math.max(1,Math.round(w*k));c.height=Math.max(1,Math.round(h*k));
+ c.getContext('2d').drawImage(im,0,0,c.width,c.height);const n=t.clone();n.image=c;n.needsUpdate=true;return n}
+function lightMat(m){if(!m)return;['map','alphaMap'].forEach(k=>{if(m[k])m[k]=shrinkTex(m[k],512)});
+ ['normalMap','roughnessMap','metalnessMap','aoMap','emissiveMap','bumpMap','displacementMap'].forEach(k=>{if(m[k])m[k]=null});
+ if('roughness' in m)m.roughness=.9;if('metalness' in m)m.metalness=0;m.needsUpdate=true}
 function prepTree(root){root.updateMatrixWorld(true);const parts=[],box=new THREE.Box3();
  let tris=0;
  root.traverse(c=>{if(!c.isMesh||!c.geometry)return;const g=c.geometry.clone();tris+=(g.index?g.index.count:g.attributes.position.count)/3;
+  [].concat(c.material).forEach(lightMat);
   [].concat(c.material).forEach(m=>{if(m&&m.map&&m.transparent){m.transparent=false;m.alphaTest=Math.max(m.alphaTest||0,.5);m.depthWrite=true}if(m)m.side=THREE.DoubleSide});g.deleteAttribute('skinIndex');g.deleteAttribute('skinWeight');g.applyMatrix4(c.matrixWorld);g.computeBoundingBox();box.union(g.boundingBox);parts.push({geo:g,mat:c.material})});
  const ct=box.getCenter(new THREE.Vector3());parts.forEach(p=>p.geo.translate(-ct.x,-box.min.y,-ct.z));
  return{parts,tris:Math.max(1,Math.round(tris)),H:Math.max(.001,box.max.y-box.min.y)}}
@@ -134,7 +144,7 @@ const _m4=new THREE.Matrix4(),_q=new THREE.Quaternion(),_Y=new THREE.Vector3(0,1
 function updateTrees(force){if(!treeG||!TALL.length)return;
  if(!force&&Math.hypot(P.x-lastTX,P.z-lastTZ)<40)return;lastTX=P.x;lastTZ=P.z;const R2=TREE_R*TREE_R,near=[];let n=0;
  for(const t of TALL){const dx=t.x-P.x,dz=t.z-P.z,d=dx*dx+dz*dz;if(d<=R2){t.d=d;near.push(t)}}
- near.sort((a,b)=>a.d-b.d);near.length=Math.min(near.length,Math.max(8,Math.floor(TREE_TRIS/TMODEL.tris)));
+ near.sort((a,b)=>a.d-b.d);near.length=Math.min(near.length,Math.max(12,Math.floor(TREE_TRIS/TMODEL.tris)));
  for(const t of near){
   _m4.compose(_p.set(t.x,t.y,t.z),_q.setFromAxisAngle(_Y,t.ry),_sc.setScalar(t.h/TMODEL.H));
   treeG.children.forEach(im=>im.setMatrixAt(n,_m4));n++}
@@ -343,7 +353,7 @@ function start(o){
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;o.updateMatrixWorld(true);
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
- const NT=hideTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
+ const NT=SANS?0:hideTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  for(let i=0;i<TILES;i++)for(let j=0;j<TILES;j++){const tg=new THREE.Group();
   tg.position.set((i-cc)*sz.x,0,(j-cc)*sz.z);tg.scale.set(Math.abs(i-cc)%2?-1:1,1,Math.abs(j-cc)%2?-1:1);
@@ -360,11 +370,11 @@ tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scen
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
 
 // ===== Chargement des arbres =====
-function loadTrees(){if(TMODEL)return;
- loader.load(TREE_URL,g=>{try{TMODEL=prepTree(g.scene);if(MAP){HT=buildTrees();msg.style.opacity=1;msg.textContent='Arbres : '+HT+' posés · '+TMODEL.tris+' triangles par arbre';setTimeout(()=>msg.style.opacity=0,8000)}}
+function loadTrees(){if(SANS||TMODEL)return;
+ loader.load(TREE_URL,g=>{try{TMODEL=prepTree(g.scene);if(MAP&&!LOST){HT=buildTrees();msg.style.opacity=1;msg.textContent='Arbres : '+HT+' posés · '+TMODEL.tris+' triangles par arbre';setTimeout(()=>msg.style.opacity=0,8000)}}
   catch(e){msg.style.opacity=1;msg.textContent='Arbres : erreur '+e.message}},
   undefined,()=>{msg.style.opacity=1;msg.textContent='Erreur de chargement des arbres : '+TREE_URL})}
-r.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();msg.style.opacity=1;msg.textContent='Mémoire graphique saturée : recharge la page (trop d\'arbres ou modèle trop lourd)'});
+r.domElement.addEventListener('webglcontextlost',e=>{LOST=true;e.preventDefault();msg.style.opacity=1;msg.textContent='Mémoire graphique saturée : recharge la page (trop d\'arbres ou modèle trop lourd)'});
 // ===== Boucle =====
 onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
 let tPrev=performance.now()/1000;
