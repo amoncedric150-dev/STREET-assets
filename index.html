@@ -40,30 +40,14 @@ const loader=new THREE.GLTFLoader();let base=location.href.split('?')[0].split('
 function clean(root){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push(o)});k.forEach(o=>o.parent&&o.parent.remove(o));
  root.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&((m.transparent&&m.opacity<.15)||m.colorWrite===false))m.visible=false})})}
 // Arbres du fichier : un seul gros mesh de feuilles (matériaux « FoliageTrees… ») et un d'écorce (« CityGenBark… ») par tuile
-const SANS=/sanstrees/i.test(location.search); // ouvrir la page avec ?sanstrees pour désactiver les nouveaux arbres
-let LOST=false;
-addEventListener('error',e=>{if(!LOST){msg.style.opacity=1;msg.textContent='Erreur : '+e.message+' ('+String(e.filename||'').split('/').pop()+':'+e.lineno+')'}});
+let TDEAD=false;
+addEventListener('error',e=>{msg.style.opacity=1;msg.textContent='Erreur : '+e.message+' ('+String(e.filename||'').split('/').pop()+':'+e.lineno+')'});
+function restoreTrees(e){if(TDEAD)return false;TDEAD=true;let n=0;
+ if(wrap)wrap.traverse(c=>{if(c.isMesh){const ms=[].concat(c.material);if(ms.length&&ms.every(m=>m&&TREE_MAT.test(m.name||''))){c.visible=true;n++}}});
+ if(!n)return false;setTimeout(()=>{if(MAP&&wrap)buildMap()},100);msg.style.opacity=1;msg.textContent='Suppression des arbres annulée (erreur : '+((e&&e.message)||e)+')';return true}
 const TREE_MAT=/^(FoliageTrees|CityGenBark)/i;
-const BARK_MAT=/^CityGenBark/i;
-let TREEPOS=[]; // arbres d'origine : {lx,lz,ly,h} dans le repère de la tuile (échelle 1)
-function treePositions(bark){ // un arbre = un amas de sommets d'écorce près du sol
- const v=new THREE.Vector3(),P=[];let minY=1e9;
- for(const c of bark){const a=c.geometry.attributes.position;for(let i=0;i<a.count;i++){v.fromBufferAttribute(a,i).applyMatrix4(c.matrixWorld);P.push(v.x,v.y,v.z);if(v.y<minY)minY=v.y}}
- if(!P.length)return[];
- const cs=1.5/s0,lowY=minY+3/s0,cells=new Map();
- for(let i=0;i<P.length;i+=3){if(P[i+1]>lowY)continue;const key=Math.floor(P[i]/cs)+','+Math.floor(P[i+2]/cs);let c=cells.get(key);
-  if(!c){c={ix:Math.floor(P[i]/cs),iz:Math.floor(P[i+2]/cs),n:0,sx:0,sz:0,y:1e9,seen:false};cells.set(key,c)}c.n++;c.sx+=P[i];c.sz+=P[i+2];c.y=Math.min(c.y,P[i+1])}
- const trees=[];
- for(const c0 of cells.values()){if(c0.seen)continue;const q=[c0];c0.seen=true;let n=0,sx=0,sz=0,y=1e9;
-  while(q.length){const c=q.pop();n+=c.n;sx+=c.sx;sz+=c.sz;y=Math.min(y,c.y);
-   for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const d=cells.get((c.ix+a)+','+(c.iz+b));if(d&&!d.seen){d.seen=true;q.push(d)}}}
-  trees.push({lx:sx/n,lz:sz/n,ly:y,h:0,top:y})}
- const R=8/s0;
- for(let i=0;i<P.length;i+=3){let best=null,bd=R*R;for(const t of trees){const dx=P[i]-t.lx,dz=P[i+2]-t.lz,d=dx*dx+dz*dz;if(d<bd){bd=d;best=t}}if(best&&P[i+1]>best.top)best.top=P[i+1]}
- trees.forEach(t=>t.h=Math.max(t.top-t.ly,3/s0));return trees}
-function hideTrees(o){let n=0;const bark=[];o.traverse(c=>{if(!c.isMesh||!c.visible)return;const ms=[].concat(c.material);
- if(ms.length&&ms.every(m=>m&&TREE_MAT.test(m.name||''))){if(ms.every(m=>BARK_MAT.test(m.name||'')))bark.push(c);c.visible=false;n++}});
- try{TREEPOS=treePositions(bark)}catch(e){TREEPOS=[]}return n}
+function hideTrees(o){let n=0;o.traverse(c=>{if(!c.isMesh||!c.visible)return;const ms=[].concat(c.material);
+ if(ms.length&&ms.every(m=>m&&TREE_MAT.test(m.name||''))){c.visible=false;n++}});return n}
 function lighten(o){const v=new THREE.Vector3();o.traverse(c=>{if(!c.isMesh||!c.geometry)return;
  const g=c.geometry,tri=(g.index?g.index.count:g.attributes.position.count)/3;
  if(tri>8000){g.computeBoundingBox();g.boundingBox.getSize(v);if(v.length()<10)c.visible=false}});
@@ -114,50 +98,6 @@ function fillTile(tg,o,info){const t=o.clone(true);tg.add(t);if(!info)return;con
   const M=m4.makeTranslation(a.cx,a.y0,a.cz).multiply(new THREE.Matrix4().makeRotationY(th)).multiply(new THREE.Matrix4().makeTranslation(-b.cx,-b.y0,-b.cz)).multiply(b.mw);
   c.matrix.copy(M);c.matrixAutoUpdate=false;c.matrixWorldNeedsUpdate=true;par.children[a.k].visible=false;tg.add(c)}}
 
-// --- Nouveaux arbres (tree_animate.glb) posés aux emplacements des anciens ; seuls ceux proches du joueur sont dessinés ---
-const TREE_URL=R2+'tree_animate.glb',TREE_R=110,TREE_TRIS=200000; // TREE_TRIS = budget de triangles d'arbres affichés en même temps
-let TMODEL=null,treeG=null,TALL=[],lastTX=1e9,lastTZ=1e9,HT=0;
-function shrinkTex(t,max){if(!t||!t.image)return t;const im=t.image,w=im.width||im.naturalWidth,h=im.height||im.naturalHeight;
- if(!w||(w<=max&&h<=max))return t;const k=max/Math.max(w,h),c=document.createElement('canvas');c.width=Math.max(1,Math.round(w*k));c.height=Math.max(1,Math.round(h*k));
- c.getContext('2d').drawImage(im,0,0,c.width,c.height);const n=t.clone();n.image=c;n.needsUpdate=true;return n}
-function lightMat(m){if(!m)return;['map','alphaMap'].forEach(k=>{if(m[k])m[k]=shrinkTex(m[k],512)});
- ['normalMap','roughnessMap','metalnessMap','aoMap','emissiveMap','bumpMap','displacementMap'].forEach(k=>{if(m[k])m[k]=null});
- if('roughness' in m)m.roughness=.9;if('metalness' in m)m.metalness=0;m.needsUpdate=true}
-function prepTree(root){root.updateMatrixWorld(true);const parts=[],box=new THREE.Box3();
- let tris=0;
- root.traverse(c=>{if(!c.isMesh||!c.geometry)return;const g=c.geometry.clone();tris+=(g.index?g.index.count:g.attributes.position.count)/3;
-  [].concat(c.material).forEach(lightMat);
-  [].concat(c.material).forEach(m=>{if(m&&m.map&&m.transparent){m.transparent=false;m.alphaTest=Math.max(m.alphaTest||0,.5);m.depthWrite=true}if(m)m.side=THREE.DoubleSide});g.deleteAttribute('skinIndex');g.deleteAttribute('skinWeight');g.applyMatrix4(c.matrixWorld);g.computeBoundingBox();box.union(g.boundingBox);parts.push({geo:g,mat:c.material})});
- const ct=box.getCenter(new THREE.Vector3());parts.forEach(p=>p.geo.translate(-ct.x,-box.min.y,-ct.z));
- return{parts,tris:Math.max(1,Math.round(tris)),H:Math.max(.001,box.max.y-box.min.y)}}
-let DEAD=false;
-function killTrees(e){if(DEAD)return;DEAD=true;
- try{if(treeG)scene.remove(treeG);treeG=null;TALL=[];TMODEL=null;
-  if(wrap)wrap.traverse(c=>{if(c.isMesh){const ms=[].concat(c.material);if(ms.length&&ms.every(m=>m&&TREE_MAT.test(m.name||'')))c.visible=true}});
-  setTimeout(()=>{if(MAP&&wrap)buildMap()},100)}catch(x){}
- msg.style.opacity=1;msg.textContent='Nouveaux arbres désactivés (erreur : '+((e&&e.message)||e)+')'}
-function buildTrees(){try{return buildTrees0()}catch(e){killTrees(e);return 0}}
-function buildTrees0(){
- if(DEAD)return 0;
- if(treeG){scene.remove(treeG);treeG.traverse(o=>{if(o.isInstancedMesh)o.dispose()})}
- treeG=new THREE.Group();TALL=[];if(!TMODEL||!TREEPOS.length||!MAP)return 0;
- const s=s0*uf,tw=box0.x*s,td=box0.z*s,cc=(TILES-1)/2;
- for(let a=-cc;a<=cc;a++)for(let b=-cc;b<=cc;b++){const sx=Math.abs(a)%2?-1:1,sz=Math.abs(b)%2?-1:1;
-  for(const t of TREEPOS){const x=a*tw+sx*t.lx*s,z=b*td+sz*t.lz*s,y=t.ly*s,h=Math.min(16,Math.max(5,t.h*s))*(.9+Math.random()*.2);
-   TALL.push({x,y,z,h,ry:Math.random()*6.28});
-   const k=cellAt(x,z);if(k>=0)for(let di=-1;di<=1;di++)for(let dj=-1;dj<=1;dj++){const kk=k+di+dj*N;if(kk>=0&&kk<NN)MAP.walk[kk]=0}}}
- TMODEL.parts.forEach(p=>{const im=new THREE.InstancedMesh(p.geo,p.mat,TALL.length);im.frustumCulled=false;im.count=0;treeG.add(im)});
- scene.add(treeG);lastTX=1e9;updateTrees(true);return TALL.length}
-const _m4=new THREE.Matrix4(),_q=new THREE.Quaternion(),_Y=new THREE.Vector3(0,1,0),_p=new THREE.Vector3(),_sc=new THREE.Vector3();
-function updateTrees(force){try{updateTrees0(force)}catch(e){killTrees(e)}}
-function updateTrees0(force){if(!treeG||!TALL.length)return;
- if(!force&&Math.hypot(P.x-lastTX,P.z-lastTZ)<40)return;lastTX=P.x;lastTZ=P.z;const R2=TREE_R*TREE_R,near=[];let n=0;
- for(const t of TALL){const dx=t.x-P.x,dz=t.z-P.z,d=dx*dx+dz*dz;if(d<=R2){t.d=d;near.push(t)}}
- near.sort((a,b)=>a.d-b.d);near.length=Math.min(near.length,Math.max(12,Math.floor(TREE_TRIS/TMODEL.tris)));
- for(const t of near){
-  _m4.compose(_p.set(t.x,t.y,t.z),_q.setFromAxisAngle(_Y,t.ry),_sc.setScalar(t.h/TMODEL.H));
-  treeG.children.forEach(im=>im.setMatrixAt(n,_m4));n++}
- treeG.children.forEach(im=>{im.count=n;im.instanceMatrix.needsUpdate=true})}
 // --- Alentours : tuiles du fichier SANS bâtiments (routes + trottoirs du fichier) + maisons procédurales ---
 const RING=0;                       // nombre d'anneaux de tuiles autour de la ville (1 = 5x5 au total)
 let LOTS=[],houseG=null,outerG=null,HOUSES=[],HGRID=new Map(),EXT=0,TOPS=null;
@@ -229,12 +169,12 @@ function buildMap(){
  ortho.left=-half;ortho.right=half;ortho.top=half;ortho.bottom=-half;ortho.near=.1;ortho.far=sy+30;ortho.updateProjectionMatrix();
  ortho.position.set(0,sy+10,0);ortho.up.set(0,0,-1);ortho.lookAt(0,0,0);ortho.updateMatrixWorld(true);
  const oc=new THREE.Color();r.getClearColor(oc);const oa=r.getClearAlpha(),ob=scene.background,of=scene.fog;
- ground.visible=false;P.m.visible=false;npcGroup.visible=false;if(outerG)outerG.visible=false;if(houseG)houseG.visible=false;const sbv=selBox?selBox.visible:false;if(selBox)selBox.visible=false;const tgv=treeG?treeG.visible:true;if(treeG)treeG.visible=false;scene.background=null;scene.fog=null;scene.overrideMaterial=hmat;
+ ground.visible=false;P.m.visible=false;npcGroup.visible=false;if(outerG)outerG.visible=false;if(houseG)houseG.visible=false;const sbv=selBox?selBox.visible:false;if(selBox)selBox.visible=false;scene.background=null;scene.fog=null;scene.overrideMaterial=hmat;
  r.setClearColor(0x000000,0);r.setRenderTarget(rt);r.render(scene,ortho);
  if(!BUF){BUF=new Uint8Array(NN*4);HH=new Float32Array(NN);HAS=new Uint8Array(NN);WALK=new Uint8Array(NN);SAFE=new Uint8Array(NN);TMP=new Uint8Array(NN);QQ=new Int32Array(NN)}
  r.readRenderTargetPixels(rt,0,0,N,N,BUF);
  r.setRenderTarget(null);scene.overrideMaterial=null;scene.background=ob;scene.fog=of;r.setClearColor(oc,oa);
- ground.visible=true;P.m.visible=true;npcGroup.visible=true;if(outerG)outerG.visible=true;if(houseG)houseG.visible=true;if(selBox)selBox.visible=sbv;if(treeG)treeG.visible=tgv;
+ ground.visible=true;P.m.visible=true;npcGroup.visible=true;if(outerG)outerG.visible=true;if(houseG)houseG.visible=true;if(selBox)selBox.visible=sbv;
  const cell=S/N,H=HH,has=HAS,walk=WALK,bins={};walk.fill(0);const rg=sy+2;
  for(let k=0;k<NN;k++){if(BUF[k*4+3]===0){has[k]=0;H[k]=0;continue}has[k]=1;H[k]=((BUF[k*4]+BUF[k*4+1]/255)/255)*rg;const b=Math.round(H[k]/.75);bins[b]=(bins[b]||0)+1}
  let bb=0,bn=-1;for(const b in bins)if(bins[b]>bn){bn=bins[b];bb=+b}
@@ -257,7 +197,7 @@ function buildMap(){
  let ns=0;for(let j=2;j<N-2;j++){const row=j*N;for(let i=0;i<N;i++){const v=TMP[row-2*N+i]&TMP[row-N+i]&TMP[row+i]&TMP[row+N+i]&TMP[row+2*N+i];SAFE[row+i]=v;ns+=v}}
  const list=new Int32Array(ns);let p=0;for(let k=0;k<NN;k++)if(SAFE[k])list[p++]=k;
  MAP={cell,x0:-half,z0:half,H,GH:GHt,has,walk,safe:SAFE,list,g,free:wc<50||ns<10,W,D,sy};
- ground.position.y=g-.3;HN=buildHouses();HT=buildTrees()
+ ground.position.y=g-.3;HN=buildHouses()
 }
 function cellAt(x,z){const i=Math.floor((x-MAP.x0)/MAP.cell),j=Math.floor((MAP.z0-z)/MAP.cell);return(i<0||j<0||i>=N||j>=N)?-1:j*N+i}
 function cellXZ(k){const i=k&(N-1),j=k>>SH;return[MAP.x0+(i+.5)*MAP.cell,MAP.z0-(j+.5)*MAP.cell]}
@@ -362,7 +302,7 @@ function start(o){
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;o.updateMatrixWorld(true);
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
- const NT=SANS?0:hideTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
+ const NT=hideTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  for(let i=0;i<TILES;i++)for(let j=0;j<TILES;j++){const tg=new THREE.Group();
   tg.position.set((i-cc)*sz.x,0,(j-cc)*sz.z);tg.scale.set(Math.abs(i-cc)%2?-1:1,1,Math.abs(j-cc)%2?-1:1);
@@ -374,16 +314,10 @@ function start(o){
  wrap.add(outerG);
  scene.add(wrap);buildMap();spawn();
  msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT;
- setTimeout(()=>msg.style.opacity=0,7000);setTimeout(loadTrees,2500)}
+ setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
 
-// ===== Chargement des arbres =====
-function loadTrees(){if(SANS||TMODEL||DEAD)return;
- loader.load(TREE_URL,g=>{try{TMODEL=prepTree(g.scene);if(MAP&&!LOST){HT=buildTrees();msg.style.opacity=1;msg.textContent='Arbres : '+HT+' posés · '+TMODEL.tris+' triangles par arbre';setTimeout(()=>msg.style.opacity=0,8000)}}
-  catch(e){msg.style.opacity=1;msg.textContent='Arbres : erreur '+e.message}},
-  undefined,()=>{msg.style.opacity=1;msg.textContent='Erreur de chargement des arbres : '+TREE_URL})}
-r.domElement.addEventListener('webglcontextlost',e=>{LOST=true;e.preventDefault();msg.style.opacity=1;msg.textContent='Mémoire graphique saturée : recharge la page (trop d\'arbres ou modèle trop lourd)'});
 // ===== Boucle =====
 onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
 let tPrev=performance.now()/1000;
@@ -397,7 +331,7 @@ let tPrev=performance.now()/1000;
    P.face=turnTo(P.face,Math.atan2(mx,mz),10*dt)}else P.spd=0;
   P.y+=(groundAt(P.x,P.z)-P.y)*Math.min(1,12*dt);
   P.m.position.set(P.x,P.y,P.z);P.m.rotation.y=P.face;animate(P.m,dt,P.spd);
-  npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now);updateTrees(false)}
+  npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now)}
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
- try{r.render(scene,cam)}catch(e){if(treeG&&!DEAD)killTrees(e);else if(!LOST){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
+ try{r.render(scene,cam)}catch(e){if(!restoreTrees(e)){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
 </script></body></html>
