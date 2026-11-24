@@ -2,12 +2,13 @@
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Ville GTA</title>
-<script src="https://cdn.jsdelivr.net/npm/babylonjs@7.30.0/babylon.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/babylonjs-loaders@7.30.0/babylonjs.loaders.min.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/babylonjs@7.30.0/babylon.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/babylonjs-loaders@7.30.0/babylonjs.loaders.min.js"></script>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;-webkit-user-select:none;user-select:none;font-family:-apple-system,sans-serif}
 #c{width:100%;height:100%;display:block;outline:none}
 #load{position:fixed;inset:0;background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50}
+#lt{padding:0 16px;text-align:center;font-size:13px;word-break:break-word}
 #bar{width:70%;height:10px;background:#333;border-radius:5px;overflow:hidden;margin-top:16px}
 #fill{height:100%;width:0;background:#4ade80}
 #joy{position:fixed;left:24px;bottom:calc(40px + env(safe-area-inset-bottom));width:130px;height:130px;border-radius:50%;background:#ffffff22;border:2px solid #ffffff55}
@@ -26,9 +27,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none
 <div id="bDbg">🔍</div><div id="dbg"></div>
 <script>
 /* diagnostic : affiche tout de suite la version et la moindre erreur à l'écran */
-const VERSION="v4";
+const VERSION="v5";
 (function(){const t=document.getElementById("lt");t.textContent="Démarrage ("+VERSION+")…";
-  window.addEventListener("error",e=>{t.textContent="Erreur "+VERSION+" : "+(e.message||"inconnue")+(e.lineno?" (ligne "+e.lineno+")":"");});
+  window.addEventListener("error",e=>{t.textContent="Erreur "+VERSION+" : "+(e.message||"inconnue")+(e.lineno?" (ligne "+e.lineno+")":"")+(e.error&&e.error.stack?" | "+String(e.error.stack).slice(0,350):"");});
   if(typeof BABYLON==="undefined"){t.textContent="Erreur "+VERSION+" : Babylon.js n'a pas pu se charger (connexion ou CDN bloqué).";}
   else if(!BABYLON.SceneLoader||!BABYLON.GLTFFileLoader&&!BABYLON.SceneLoader.IsPluginForExtensionAvailable(".glb")){t.textContent="Erreur "+VERSION+" : le chargeur de modèles .glb n'a pas pu se charger.";}})();
 /* ===================== RÉGLAGES (à modifier ici) ===================== */
