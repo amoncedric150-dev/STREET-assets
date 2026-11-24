@@ -26,11 +26,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none
 <div id="bDbg">🔍</div><div id="dbg"></div>
 <script>
 /* ===================== RÉGLAGES (à modifier ici) ===================== */
-const BASE="https://huggingface.co/Ceddjjdiieksls/gta-city-assets/resolve/main/";
+const BASE="./models/"; // les 3 modèles sont dans le dossier models/ de ton dépôt
 const MODELS={
-  center:{file:"procedural_city_6.glb",scale:1,tex:1024,label:"Centre-ville"},
-  hood:{file:"neighbourhood_city_modular_lowpoly.glb",scale:1,tex:512,cols:2,rows:4,label:"Quartier"},
-  hk:{file:"full_gameready_city_buildings_iv_hongkong.glb",scale:5,tex:512,copies:2,label:"Hong Kong"}
+  center:{file:"centre.glb",scale:1,tex:1024,label:"Centre-ville"},
+  hood:{file:"quartier.glb",scale:1,tex:512,cols:2,rows:4,label:"Quartier"},
+  hk:{file:"hongkong.glb",scale:5,tex:512,copies:2,label:"Hong Kong"}
 };
 const GAP=14;          // largeur de la route entre 2 zones (m)
 const SIDEWALK=3;      // largeur des trottoirs (m)
@@ -222,9 +222,9 @@ addEventListener("error",e=>{$("lt").textContent="Erreur : "+(e.message||"inconn
 addEventListener("unhandledrejection",e=>{$("lt").textContent="Erreur : "+((e.reason&&e.reason.message)||e.reason);});
 (async()=>{
   try{
-    // 0) test de connexion à Hugging Face
+    // 0) vérifie que les modèles sont bien présents
     try{const r=await fetch(BASE+MODELS.center.file,{method:"HEAD"});if(!r.ok)throw new Error("HTTP "+r.status);}
-    catch(e){$("lt").textContent="Impossible de joindre Hugging Face ("+(e.message||e)+"). Ouvre le jeu depuis ton lien GitHub Pages, pas depuis l'aperçu.";return;}
+    catch(e){$("lt").textContent="Modèle introuvable ("+(e.message||e)+"). Vérifie que le dossier models/ est bien dans ton dépôt GitHub, à côté de index.html.";return;}
     // 1) Centre-ville au milieu
     let z=await loadModel("center");z.cx=0;z.cz=0;place(z,[[0,0]]);zones.center=z;
     addRect("center",-z.w/2,z.w/2,-z.d/2,z.d/2);stage++;
