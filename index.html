@@ -16,25 +16,44 @@ button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;pad
 #knob{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#9fd8ff 45%,#3a7fc0);box-shadow:0 2px 8px #0008;pointer-events:none}
 </style></head><body>
 <div id="msg">Chargement…</div>
-<div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button><button id="bi">Inspecter</button></div>
+<div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button><button id="be1">Lumière −</button><button id="be2">Lumière +</button><button id="bsh">Ombres : non</button><button id="bi">Inspecter</button></div>
 <div id="insp"><pre id="ii">Touche un objet de la ville pour voir son nom.</pre><div class="ir"><button id="ih">Masquer</button><button id="in">Même nom</button><button id="im">Même matériau</button></div><div class="ir"><button id="iu">Annuler</button><button id="il">Liste</button></div><textarea id="it" readonly></textarea></div>
 <div id="joy"><div id="knob"></div></div>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 // ===== Scène =====
-const scene=new THREE.Scene();scene.background=new THREE.Color(0x9fc4e8);scene.fog=new THREE.Fog(0x9fc4e8,250,1500);
+// ===== Ciel HDRI : fond = JPG tone-mappé, éclairage = PNG « HDR » (environnement + soleil aligné sur celui de l'image) =====
+const SKY={bg:'DaySkyHDRI069B_2K_TONEMAPPED.jpg',env:'DaySkyHDRI069B_2K_HDR.png',
+ sunAz:-1.2,sunEl:25.1,   // position du soleil DANS l'image (azimut / élévation en degrés) : mesurée sur le pixel le plus lumineux
+ sunI:2.1,envI:1.0,hemiI:0.1,expo:1.0,fog:0xb9c6cb};
+const scene=new THREE.Scene();scene.background=new THREE.Color(SKY.fog);scene.fog=new THREE.Fog(SKY.fog,300,2200);
 const cam=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,0.2,4000);
 const r=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
-r.setPixelRatio(Math.min(devicePixelRatio||1,1.5));r.setSize(innerWidth,innerHeight);r.outputEncoding=THREE.sRGBEncoding;
+r.setPixelRatio(Math.min(devicePixelRatio||1,1.5));r.setSize(innerWidth,innerHeight);r.outputEncoding=THREE.sRGBEncoding;r.toneMapping=THREE.ACESFilmicToneMapping;r.toneMappingExposure=SKY.expo;r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;
 document.body.prepend(r.domElement);
-scene.add(new THREE.HemisphereLight(0xffffff,0x667788,0.75));
-const sun=new THREE.DirectionalLight(0xfff2dd,0.9);sun.position.set(200,400,150);scene.add(sun);
+const hemi=new THREE.HemisphereLight(0xcfe4ff,0x8a8f94,SKY.hemiI);scene.add(hemi);
+const _a=SKY.sunAz*Math.PI/180,_e=SKY.sunEl*Math.PI/180;
+const SUNDIR=new THREE.Vector3(Math.cos(_e)*Math.cos(_a),Math.sin(_e),Math.cos(_e)*Math.sin(_a)).normalize(); // même repère que l'équirectangulaire three.js
+const sun=new THREE.DirectionalLight(0xfff0d8,SKY.sunI);sun.position.copy(SUNDIR).multiplyScalar(300);scene.add(sun,sun.target);
+{const sc=sun.shadow.camera;sc.left=sc.bottom=-90;sc.right=sc.top=90;sc.near=1;sc.far=700;sun.shadow.mapSize.set(2048,2048);sun.shadow.bias=-0.0004;sun.shadow.normalBias=0.4}
+let SHADOWS=false;
+function applyShadows(){sun.castShadow=SHADOWS;scene.traverse(o=>{if(o.isMesh&&o!==ground){o.castShadow=SHADOWS;o.receiveShadow=SHADOWS;if(o.material)[].concat(o.material).forEach(m=>m.needsUpdate=true)}});
+ ground.receiveShadow=SHADOWS;ground.material.needsUpdate=true}
+function loadTex(name,cb){const L=new THREE.TextureLoader();L.setCrossOrigin('anonymous');const urls=[R2+name,base+name,base+'Models/'+name];
+ (function t(){const u=urls.shift();L.load(u,cb,undefined,()=>{if(urls.length)t();else console.warn('Ciel introuvable : '+name)})})()}
+function initSky(){
+ loadTex(SKY.bg,tx=>{tx.mapping=THREE.EquirectangularReflectionMapping;tx.encoding=THREE.sRGBEncoding;tx.minFilter=THREE.LinearFilter;tx.generateMipmaps=false;scene.background=tx});
+ loadTex(SKY.env,tx=>{tx.mapping=THREE.EquirectangularReflectionMapping;tx.encoding=THREE.sRGBEncoding;
+  const pm=new THREE.PMREMGenerator(r);pm.compileEquirectangularShader();const rt2=pm.fromEquirectangular(tx);scene.environment=rt2.texture;tx.dispose();pm.dispose();
+  if(wrap)envOnCity()})}
+function envOnCity(){wrap.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&'envMapIntensity' in m){m.envMapIntensity=SKY.envI;m.needsUpdate=true}})})}
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x4a4e52,roughness:1}));
 ground.rotation.x=-Math.PI/2;scene.add(ground);
 const msg=document.getElementById('msg');
 const R2='https://pub-7b4d28c9c7ac495bb95eceec5b276d84.r2.dev/';
 const loader=new THREE.GLTFLoader();let base=location.href.split('?')[0].split('#')[0];base=base.replace(/[^\/]*$/,'');
+let wrap=null;initSky();
 
 // ===== Utilitaires de chargement (identiques à avant) =====
 function clean(root){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push(o)});k.forEach(o=>o.parent&&o.parent.remove(o));
@@ -72,7 +91,7 @@ function turnTo(cur,tgt,k){let d=tgt-cur;while(d>Math.PI)d-=2*Math.PI;while(d<-M
 
 // ===== Ville : new_york_city.glb répété en 3x3 (miroirs = routes qui se raccordent) =====
 const TARGET=350,TILES=3; // largeur d'un bloc en mètres (échelle validée) et nombre de blocs par côté
-let wrap=null,box0=null,s0=1,uf=1,MAP=null,selBox=null;
+let box0=null,s0=1,uf=1,MAP=null,selBox=null;
 try{uf=parseFloat(localStorage.getItem('ny_scale'))||1}catch(e){}
 const SH=11,N=1<<SH,NN=N*N;
 const ortho=new THREE.OrthographicCamera(-1,1,1,-1,.1,100);
@@ -145,7 +164,7 @@ function buildHouses(){
  M.forEach((h,k)=>{q.identity();
   m4.compose(new THREE.Vector3(h.x,g,h.z),q,new THREE.Vector3(h.w,h.h,h.d));body.setMatrixAt(k,m4);body.setColorAt(k,col.setHex(h.c));
   m4.compose(new THREE.Vector3(h.x,g+h.h,h.z),q,new THREE.Vector3(h.w*1.08,h.rh,h.d*1.08));roof.setMatrixAt(k,m4);roof.setColorAt(k,col.setHex(h.rc))});
- body.frustumCulled=false;roof.frustumCulled=false;houseG.add(body,roof);scene.add(houseG);return n}
+ body.frustumCulled=false;roof.frustumCulled=false;houseG.add(body,roof);scene.add(houseG);if(SHADOWS)applyShadows();return n}
 
 // Ouverture morphologique (érosion puis dilatation, rayon r cellules) : retire de OB tout ce qui est plus fin que ~2r cellules
 const LINE=new Int32Array(N+1);
@@ -284,6 +303,9 @@ el.addEventListener('pointerup',e=>{if(!inspOn||!tap)return;const d=Math.hypot(e
 function setScale(f){uf=Math.min(6,Math.max(.15,uf*f));try{localStorage.setItem('ny_scale',uf)}catch(e){}if(wrap){buildMap();spawn()}}
 document.getElementById('bm').onclick=()=>setScale(.8);document.getElementById('bp').onclick=()=>setScale(1.25);
 document.getElementById('bs').onclick=()=>{if(MAP)spawn()};
+const setExpo=f=>{r.toneMappingExposure=clamp(r.toneMappingExposure*f,.3,3);msg.style.opacity=1;msg.textContent='Exposition : '+r.toneMappingExposure.toFixed(2);setTimeout(()=>msg.style.opacity=0,1500)};
+document.getElementById('be1').onclick=()=>setExpo(.85);document.getElementById('be2').onclick=()=>setExpo(1.18);
+document.getElementById('bsh').onclick=e=>{SHADOWS=!SHADOWS;e.target.textContent='Ombres : '+(SHADOWS?'oui':'non');applyShadows()};
 
 // ===== Caméra 3e personne =====
 function updateCam(dt,now){
@@ -312,7 +334,7 @@ function start(o){
   const tg=new THREE.Group();tg.position.set(i*sz.x,0,j*sz.z);tg.scale.set(Math.abs(i)%2?-1:1,1,Math.abs(j)%2?-1:1);
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);
- scene.add(wrap);buildMap();spawn();
+ scene.add(wrap);envOnCity();buildMap();spawn();applyShadows();
  msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT;
  setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
@@ -331,7 +353,8 @@ let tPrev=performance.now()/1000;
    P.face=turnTo(P.face,Math.atan2(mx,mz),10*dt)}else P.spd=0;
   P.y+=(groundAt(P.x,P.z)-P.y)*Math.min(1,12*dt);
   P.m.position.set(P.x,P.y,P.z);P.m.rotation.y=P.face;animate(P.m,dt,P.spd);
-  npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now)}
+  npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now);
+  const q=2*180/2048;sun.target.position.set(Math.round(P.x/q)*q,P.y,Math.round(P.z/q)*q);sun.target.updateMatrixWorld();sun.position.copy(sun.target.position).addScaledVector(SUNDIR,300)}
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
  try{r.render(scene,cam)}catch(e){if(!restoreTrees(e)){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
 </script></body></html>
