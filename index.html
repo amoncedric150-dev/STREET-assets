@@ -84,8 +84,27 @@ function fillTile(tg,o,info){const t=o.clone(true);tg.add(t);if(!info)return;con
   const M=m4.makeTranslation(a.cx,a.y0,a.cz).multiply(new THREE.Matrix4().makeRotationY(th)).multiply(new THREE.Matrix4().makeTranslation(-b.cx,-b.y0,-b.cz)).multiply(b.mw);
   c.matrix.copy(M);c.matrixAutoUpdate=false;c.matrixWorldNeedsUpdate=true;par.children[a.k].visible=false;tg.add(c)}}
 
+// --- Arbres du fichier : détectés par leur nom (mesh, groupe, matériau) ou par leur forme verte, masqués, positions gardées dans TREES ---
+let TREES=[];window.TREES=TREES;
+function removeTrees(o){
+ const re=/tree|arbre|leaf|leaves|foliage|vegetation|plant|bush|shrub|palm|trunk|branch|hedge|conifer|pine|canopy/i,notre=/grass|lawn|road|street|sidewalk|building|ground|terrain/i;
+ const meshes=[],b=new THREE.Box3(),v=new THREE.Vector3(),ct=new THREE.Vector3(),names=new Set();
+ o.traverse(c=>{if(c.isMesh&&c.geometry)meshes.push(c)});TREES=[];window.TREES=TREES;
+ for(const c of meshes){
+  const mats=[].concat(c.material),own=(c.name||'')+' '+mats.map(m=>m&&m.name||'').join(' ');
+  let anc='';for(let p=c.parent;p;p=p.parent)anc+=(p.name||'')+' ';
+  names.add((c.name||'?')+' | '+mats.map(m=>m&&m.name||'?').join(','));
+  b.setFromObject(c);if(b.isEmpty())continue;b.getSize(v);b.getCenter(ct);
+  const hm=v.y*s0,fm=Math.max(v.x,v.z)*s0;
+  let isTree=re.test(own)&&!notre.test(own.replace(re,''));
+  if(!isTree&&re.test(anc)&&fm<40&&hm<40)isTree=true;
+  if(!isTree&&hm>3&&hm<25&&fm<20){ // forme verte : feuillage
+   isTree=mats.some(m=>m&&m.color&&m.color.g>m.color.r*1.12&&m.color.g>m.color.b*1.12&&!(m.map&&m.color.r>.9&&m.color.g>.9))}
+  if(isTree){c.visible=false;TREES.push({x:ct.x,z:ct.z,y:b.min.y,h:v.y,w:Math.max(v.x,v.z),name:c.name||''})}}
+ console.log('Arbres retirés :',TREES.length,'| meshes :',[...names].slice(0,80));
+ return TREES.length}
 // --- Alentours : tuiles du fichier SANS bâtiments (routes + trottoirs du fichier) + maisons procédurales ---
-const RING=1;                       // nombre d'anneaux de tuiles autour de la ville (1 = 5x5 au total)
+const RING=0;                       // nombre d'anneaux de tuiles autour de la ville (1 = 5x5 au total)
 let LOTS=[],houseG=null,outerG=null,HOUSES=[],HGRID=new Map(),EXT=0,TOPS=null;
 const HC=10; // taille des cases de la grille de collision des maisons (m)
 function findLots(o,sz){ // empreintes des bâtiments du fichier (repère de la tuile, échelle 1)
@@ -258,7 +277,7 @@ function start(o){
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;o.updateMatrixWorld(true);
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
- const info=makeSlots(o,sz);lighten(o);const FL=findLots(o,sz);LOTS=FL.lots;
+ const NT=removeTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  for(let i=0;i<TILES;i++)for(let j=0;j<TILES;j++){const tg=new THREE.Group();
   tg.position.set((i-cc)*sz.x,0,(j-cc)*sz.z);tg.scale.set(Math.abs(i-cc)%2?-1:1,1,Math.abs(j-cc)%2?-1:1);
@@ -269,7 +288,7 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);
  scene.add(wrap);buildMap();spawn();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · maisons : '+HN;
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres retirés : '+NT;
  setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
