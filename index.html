@@ -1,87 +1,189 @@
 <!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes"><title>Ville 3D</title>
+<meta name="apple-mobile-web-app-capable" content="yes"><title>Ville 3D – New York</title>
 <style>
-html,body{margin:0;height:100%;overflow:hidden;background:#9fc4e8;font-family:system-ui,sans-serif;touch-action:none}
-canvas{display:block}
-#ui{position:fixed;left:0;right:0;bottom:0;padding:10px 10px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;padding:10px 14px;font-size:14px}
-button.off{opacity:.4}
-#msg{position:fixed;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;color:#fff;background:#000a;border-radius:10px;padding:8px 12px;font-size:13px}
+html,body{margin:0;height:100%;overflow:hidden;background:#9fc4e8;font-family:system-ui,sans-serif;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+canvas{display:block;touch-action:none}
+#msg{position:fixed;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;color:#fff;background:#000a;border-radius:10px;padding:8px 12px;font-size:13px;transition:opacity .8s;pointer-events:none}
+#top{position:fixed;top:calc(58px + env(safe-area-inset-top));right:10px;display:flex;gap:8px}
+button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;padding:8px 12px;font-size:13px}
+#joy{position:fixed;left:50%;bottom:calc(30px + env(safe-area-inset-bottom));width:120px;height:120px;margin-left:-60px;border-radius:50%;border:3px solid #35e0ff;box-shadow:0 0 14px #35e0ff99,inset 0 0 14px #35e0ff55;background:rgba(20,40,70,.35);touch-action:none}
+#knob{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#9fd8ff 45%,#3a7fc0);box-shadow:0 2px 8px #0008;pointer-events:none}
 </style></head><body>
-<div id="msg">Chargement…</div><div id="ui"></div>
+<div id="msg">Chargement…</div>
+<div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button></div>
+<div id="joy"><div id="knob"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
-const scene=new THREE.Scene();scene.background=new THREE.Color(0x9fc4e8);scene.fog=new THREE.Fog(0x9fc4e8,400,1800);
-const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.5,4000);
-const r=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});r.setPixelRatio(1);r.setSize(innerWidth,innerHeight);
-r.outputEncoding=THREE.sRGBEncoding;document.body.prepend(r.domElement);
-scene.add(new THREE.HemisphereLight(0xffffff,0x667788,0.7));
+// ===== Scène =====
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x9fc4e8);scene.fog=new THREE.Fog(0x9fc4e8,150,900);
+const cam=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,0.2,4000);
+const r=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
+r.setPixelRatio(Math.min(devicePixelRatio||1,1.5));r.setSize(innerWidth,innerHeight);r.outputEncoding=THREE.sRGBEncoding;
+document.body.prepend(r.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x667788,0.75));
 const sun=new THREE.DirectionalLight(0xfff2dd,0.9);sun.position.set(200,400,150);scene.add(sun);
-const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x555a5e,roughness:1}));
-ground.rotation.x=-Math.PI/2;ground.position.y=-0.2;scene.add(ground);
-// ===== Petite ville : 4 modèles assemblés =====
-let dirty=true;const R2='https://pub-7b4d28c9c7ac495bb95eceec5b276d84.r2.dev/';
-const HALF=150,ROAD_W=16,SW=4,CURB=0.25,INNER=ROAD_W/2+SW+1,Q=HALF-INNER-4,QC=INNER+Q/2;
-const ui=document.getElementById('ui'),msg=document.getElementById('msg');
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x4a4e52,roughness:1}));
+ground.rotation.x=-Math.PI/2;scene.add(ground);
+const msg=document.getElementById('msg');
+const R2='https://pub-7b4d28c9c7ac495bb95eceec5b276d84.r2.dev/';
 const loader=new THREE.GLTFLoader();let base=location.href.split('?')[0].split('#')[0];base=base.replace(/[^\/]*$/,'');
-function box(w,h,d,x,y,z,c){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:c,roughness:.9}));m.position.set(x,y,z);return m}
-function addBtn(n,get){const b=document.createElement('button');b.textContent=n;ui.appendChild(b);b.onclick=()=>{const o=get();if(!o)return;dirty=true;o.visible=!o.visible;b.classList.toggle('off',!o.visible)}}
-// Routes en croix, trottoirs, bordures, marquages, îlots de fond
-const streets=new THREE.Group(),L=HALF*2,off=ROAD_W/2+SW/2,len=HALF-ROAD_W/2-SW;
-streets.add(box(L,.1,L,0,-.12,0,0x5b5f58),box(L,.1,ROAD_W,0,-.05,0,0x2b2d31),box(ROAD_W,.1,L,0,-.04,0,0x2b2d31));
-for(const a of[-1,1])for(const b of[-1,1]){const mid=b*(ROAD_W/2+SW+len/2);
- streets.add(box(len,CURB,SW,mid,CURB/2,a*off,0x9a9a96),box(SW,CURB,len,a*off,CURB/2,mid,0x9a9a96),
- box(SW,CURB,SW,a*off,CURB/2,b*off,0x9a9a96),
- box(HALF-INNER,.15,HALF-INNER,a*(INNER+(HALF-INNER)/2),.075,b*(INNER+(HALF-INNER)/2),0x77786f))}
-for(let i=-HALF+6;i<HALF;i+=12){if(Math.abs(i)<ROAD_W)continue;streets.add(box(5,.02,.3,i,.06,0,0xe8c547),box(.3,.02,5,0,.07,i,0xe8c547))}
-scene.add(streets);addBtn('Routes',()=>streets);
-// Nettoyage : points/lignes parasites, collisions, lightmaps, mer, matériaux alpha 0
-function clean(root,re){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push(o);else if(o.isMesh&&re&&(re.test(o.name)||re.test(o.parent&&o.parent.name||'')))k.push(o)});
- k.forEach(o=>o.parent&&o.parent.remove(o));
+
+// ===== Utilitaires de chargement (identiques à avant) =====
+function clean(root){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push(o)});k.forEach(o=>o.parent&&o.parent.remove(o));
  root.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&m.transparent&&m.opacity===0)m.visible=false})})}
-// Mise à l'échelle dans un carré, socle à y=0, centrage, rotation
-function place(o,{size,cx,cz,rotY=0,maxScale=Infinity}){o.rotation.y=rotY;o.updateMatrixWorld(true);
- let bx=new THREE.Box3().setFromObject(o),s=bx.getSize(new THREE.Vector3());o.scale.multiplyScalar(Math.min(size/Math.max(s.x,s.z),maxScale));
- o.updateMatrixWorld(true);bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
- o.position.x+=cx-c.x;o.position.z+=cz-c.z;o.position.y+=-bx.min.y}
-const items=[
- {f:'new_york_city.glb',n:'New York',opt:{size:Q,cx:QC,cz:-QC}},
- {f:'Untitled.glb',n:'Bâtiments',opt:{size:Q*.9,cx:-QC,cz:-QC,maxScale:1.2}},
- {f:'city.glb',n:'Rue',tex:256,opt:{size:Q,cx:-QC,cz:QC,rotY:Math.PI/2}},
- {f:'traffic_slam_2_map.glb',n:'Carte',re:/collision|invisiblewall|lightmap|sea|water|ocean/i,opt:{size:Q,cx:QC,cz:QC}}];
 function shrink(root,max){const seen=new Set();root.traverse(o=>{if(!o.isMesh)return;[].concat(o.material).forEach(m=>{for(const k in m){const t=m[k];
  if(t&&t.isTexture&&!seen.has(t)){seen.add(t);const im=t.image;
   if(im&&im.width>max){const c=document.createElement('canvas');c.width=max;c.height=Math.max(1,Math.round(im.height*max/im.width));
    c.getContext('2d').drawImage(im,0,0,c.width,c.height);if(im.close)im.close();t.image=c;t.needsUpdate=true}}}})})}
-// Allègement : masque les petits objets très lourds (>8000 triangles dans moins de 10 unités),
-// puis fige les matrices (objets statiques)
-function lighten(o){const tmp=new THREE.Box3(),v=new THREE.Vector3();o.traverse(c=>{if(!c.isMesh||!c.geometry)return;
+function lighten(o){const v=new THREE.Vector3();o.traverse(c=>{if(!c.isMesh||!c.geometry)return;
  const g=c.geometry,tri=(g.index?g.index.count:g.attributes.position.count)/3;
  if(tri>8000){g.computeBoundingBox();g.boundingBox.getSize(v);if(v.length()<10)c.visible=false}});
  o.updateMatrixWorld(true);o.traverse(c=>{c.matrixAutoUpdate=false})}
 function tryLoad(urls,onok,onerr,onprog){const u=urls.shift();loader.load(u,onok,onprog,()=>urls.length?tryLoad(urls,onok,onerr,onprog):onerr(u))}
-items.forEach(it=>addBtn(it.n,()=>it.obj));
-function next(i){if(i>=items.length){msg.textContent='Glisse = tourner · 2 doigts = zoom/déplacer';return}
- const it=items[i];
- tryLoad([R2+it.f,base+'Models/'+it.f],g=>{const o=g.scene;clean(o,it.re);shrink(o,it.tex||512);place(o,it.opt);lighten(o);scene.add(o);it.obj=o;dirty=true;next(i+1)},
-  u=>{msg.textContent='Erreur de chargement : '+u;next(i+1)},
-  e=>{if(e.total)msg.textContent='Chargement '+it.n+' ('+(i+1)+'/'+items.length+') '+Math.round(e.loaded/e.total*100)+'%'})}
-next(0);
-// Contrôles tactiles
-let th=0.6,ph=1.0,dist=380;const tg=new THREE.Vector3(0,0,0);let pts=new Map(),last=0,lc=null;
-const el=r.domElement;['pointermove','pointerdown','pointerup','wheel'].forEach(t=>el.addEventListener(t,()=>{dirty=true}));
-el.onpointerdown=e=>{el.setPointerCapture(e.pointerId);pts.set(e.pointerId,[e.clientX,e.clientY]);last=0};
-el.onpointerup=el.onpointercancel=e=>{pts.delete(e.pointerId);last=0;lc=null};
-el.onpointermove=e=>{if(!pts.has(e.pointerId))return;const p=pts.get(e.pointerId);const dx=e.clientX-p[0],dy=e.clientY-p[1];pts.set(e.pointerId,[e.clientX,e.clientY]);
- if(pts.size==1){th-=dx*0.006;ph=Math.min(1.5,Math.max(0.15,ph-dy*0.005))}
- else if(pts.size==2){const a=[...pts.values()],d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);
-  if(last)dist=Math.min(1500,Math.max(10,dist*last/d));last=d;
-  const k=dist*0.0015,mx=(dx/2),my=(dy/2);tg.x-=(Math.cos(th)*mx+Math.sin(th)*my)*k;tg.z-=(-Math.sin(th)*mx+Math.cos(th)*my)*k}};
-el.onwheel=e=>{dist=Math.min(1500,Math.max(10,dist*(1+e.deltaY*0.001)))};
-onresize=()=>{dirty=true;cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
-(function loop(){requestAnimationFrame(loop);
- cam.position.set(tg.x+dist*Math.sin(ph)*Math.sin(th),tg.y+dist*Math.cos(ph),tg.z+dist*Math.sin(ph)*Math.cos(th));cam.lookAt(tg);if(dirty){r.render(scene,cam);dirty=false}})();
+
+// ===== Personnages (prototype en formes simples, 1,8 m) =====
+const G={torso:new THREE.BoxGeometry(.5,.6,.28),head:new THREE.SphereGeometry(.17,10,8),
+ leg:new THREE.BoxGeometry(.18,.9,.18).translate(0,-.45,0),arm:new THREE.BoxGeometry(.14,.6,.14).translate(0,-.3,0),face:new THREE.BoxGeometry(.2,.06,.04)};
+function makeHuman(shirt,pants,skin){
+ const M=c=>new THREE.MeshStandardMaterial({color:c,roughness:.8}),g=new THREE.Group();
+ const mS=M(shirt),mP=M(pants),mK=M(skin);
+ const torso=new THREE.Mesh(G.torso,mS);torso.position.y=1.2;
+ const head=new THREE.Mesh(G.head,mK);head.position.y=1.67;
+ const face=new THREE.Mesh(G.face,M(0x222222));face.position.set(0,1.69,.15);
+ const legL=new THREE.Mesh(G.leg,mP),legR=new THREE.Mesh(G.leg,mP);legL.position.set(-.13,.9,0);legR.position.set(.13,.9,0);
+ const armL=new THREE.Mesh(G.arm,mS),armR=new THREE.Mesh(G.arm,mS);armL.position.set(-.34,1.48,0);armR.position.set(.34,1.48,0);
+ g.add(torso,head,face,legL,legR,armL,armR);g.userData={legL,legR,armL,armR,ph:Math.random()*6};return g}
+function animate(h,dt,spd){const u=h.userData;u.ph+=dt*(3+spd*1.6);const a=Math.min(.9,spd*.22)*Math.sin(u.ph);
+ u.legL.rotation.x=a;u.legR.rotation.x=-a;u.armL.rotation.x=-a;u.armR.rotation.x=a}
+function turnTo(cur,tgt,k){let d=tgt-cur;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return cur+d*Math.min(1,k)}
+
+// ===== Ville : uniquement new_york_city.glb =====
+const TARGET=350; // largeur de départ de la ville en mètres (réglable avec Échelle − / +)
+let wrap=null,box0=null,s0=1,uf=1,MAP=null;
+try{uf=parseFloat(localStorage.getItem('ny_scale'))||1}catch(e){}
+const N=512,ortho=new THREE.OrthographicCamera(-1,1,1,-1,.1,100);
+const rt=new THREE.WebGLRenderTarget(N,N,{minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter,format:THREE.RGBAFormat,type:THREE.UnsignedByteType});
+const hmat=new THREE.ShaderMaterial({uniforms:{uMin:{value:0},uRange:{value:1}},side:THREE.DoubleSide,
+ vertexShader:'varying float vY;uniform float uMin;uniform float uRange;void main(){vec4 w=modelMatrix*vec4(position,1.0);vY=(w.y-uMin)/uRange;gl_Position=projectionMatrix*viewMatrix*w;}',
+ fragmentShader:'varying float vY;void main(){float a=clamp(vY,0.0,0.9999)*255.0;float hi=floor(a);gl_FragColor=vec4(hi/255.0,a-hi,0.0,1.0);}'});
+
+// Carte des hauteurs vue du dessus : sert au sol, aux collisions de la ville et de la caméra
+function buildMap(){
+ const s=s0*uf;wrap.scale.setScalar(s);wrap.updateMatrixWorld(true);
+ const sx=box0.x*s,sy=box0.y*s,sz=box0.z*s,S=Math.max(sx,sz)+4,half=S/2;
+ hmat.uniforms.uMin.value=0;hmat.uniforms.uRange.value=sy+2;
+ ortho.left=-half;ortho.right=half;ortho.top=half;ortho.bottom=-half;ortho.near=.1;ortho.far=sy+30;ortho.updateProjectionMatrix();
+ ortho.position.set(0,sy+10,0);ortho.up.set(0,0,-1);ortho.lookAt(0,0,0);ortho.updateMatrixWorld(true);
+ const oc=new THREE.Color();r.getClearColor(oc);const oa=r.getClearAlpha(),ob=scene.background,of=scene.fog;
+ ground.visible=false;P.m.visible=false;npcGroup.visible=false;scene.background=null;scene.fog=null;scene.overrideMaterial=hmat;
+ r.setClearColor(0x000000,0);r.setRenderTarget(rt);r.render(scene,ortho);
+ const buf=new Uint8Array(N*N*4);r.readRenderTargetPixels(rt,0,0,N,N,buf);
+ r.setRenderTarget(null);scene.overrideMaterial=null;scene.background=ob;scene.fog=of;r.setClearColor(oc,oa);
+ ground.visible=true;P.m.visible=true;npcGroup.visible=true;
+ const cell=S/N,H=new Float32Array(N*N),has=new Uint8Array(N*N),bins={};let cnt=0;
+ for(let k=0;k<N*N;k++){if(buf[k*4+3]===0)continue;has[k]=1;cnt++;
+  H[k]=((buf[k*4]+buf[k*4+1]/255)/255)*(sy+2);const b=Math.round(H[k]/.75);bins[b]=(bins[b]||0)+1}
+ let bb=0,bn=-1;for(const b in bins)if(bins[b]>bn){bn=bins[b];bb=+b}
+ const g=bb*.75,walk=new Uint8Array(N*N);let wc=0;
+ for(let k=0;k<N*N;k++)if(has[k]&&Math.abs(H[k]-g)<=1.3){walk[k]=1;wc++}
+ const safe=new Uint8Array(N*N),list=[];
+ for(let j=2;j<N-2;j++)for(let i=2;i<N-2;i++){let ok=1;
+  for(let dj=-2;dj<=2&&ok;dj++)for(let di=-2;di<=2;di++)if(!walk[(j+dj)*N+i+di]){ok=0;break}
+  if(ok){safe[j*N+i]=1;list.push(j*N+i)}}
+ MAP={cell,x0:-half,z0:half,H,has,walk,safe,list,g,free:wc<50||list.length<10,sx,sz,sy};
+ ground.position.y=g-.3;
+}
+function cellAt(x,z){const i=Math.floor((x-MAP.x0)/MAP.cell),j=Math.floor((MAP.z0-z)/MAP.cell);return(i<0||j<0||i>=N||j>=N)?-1:j*N+i}
+function cellXZ(k){const i=k%N,j=(k-i)/N;return[MAP.x0+(i+.5)*MAP.cell,MAP.z0-(j+.5)*MAP.cell]}
+const OFF=[[0,0],[.35,0],[-.35,0],[0,.35],[0,-.35]];
+function canStand(x,z){if(MAP.free)return true;for(const o of OFF){const k=cellAt(x+o[0],z+o[1]);if(k<0||!MAP.walk[k])return false}return true}
+function groundAt(x,z){const k=cellAt(x,z);return(k>=0&&MAP.walk[k])?MAP.H[k]:MAP.g}
+function topAt(x,z){const k=cellAt(x,z);return(k>=0&&MAP.has[k])?MAP.H[k]:-1e9}
+
+// ===== Joueur + PNJ =====
+const P={m:makeHuman(0xd8412f,0x2b3a55,0xe0b48f),x:0,y:0,z:0,face:0,spd:0};scene.add(P.m);
+const npcGroup=new THREE.Group();scene.add(npcGroup);let npcs=[];
+const SHIRT=[0x3b6ea5,0x6a8f3c,0xe0a030,0x8a4fb0,0xc0c0c0,0x2f2f2f,0xb04040,0x30a0a0,0xf0f0f0],PANTS=[0x222831,0x3a3a3a,0x4a5a7a,0x6b5a40,0x1e2a44],SKIN=[0xf0c8a0,0xd9a577,0xa66e45,0x6b432a];
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function spawn(){
+ npcs.forEach(n=>npcGroup.remove(n.m));npcs=[];
+ let best=-1,bd=1e9;
+ for(const k of MAP.list){const[x,z]=cellXZ(k),d=x*x+z*z;if(d<bd){bd=d;best=k}}
+ if(best>=0){const[x,z]=cellXZ(best);P.x=x;P.z=z}else{P.x=0;P.z=0}
+ P.y=groundAt(P.x,P.z);yaw=0;pitch=.28;camDist=5.5;
+ const near=MAP.list.filter(k=>{const[x,z]=cellXZ(k);return Math.hypot(x-P.x,z-P.z)<160&&Math.hypot(x-P.x,z-P.z)>6});
+ const n=Math.min(30,near.length);
+ for(let i=0;i<n;i++){const k=near[Math.floor(Math.random()*near.length)],[x,z]=cellXZ(k);
+  const m=makeHuman(pick(SHIRT),pick(PANTS),pick(SKIN));m.scale.setScalar(.95+Math.random()*.12);npcGroup.add(m);
+  npcs.push({m,x,z,y:groundAt(x,z),h:Math.random()*6.28,rot:0,t:Math.random()*4,v:1.1+Math.random()*.7,spd:0})}
+}
+function updateNPC(n,dt){
+ n.t-=dt;if(n.t<0){n.h+=(Math.random()-.5)*1.4;n.t=2+Math.random()*4}
+ const nx=n.x+Math.sin(n.h)*n.v*dt,nz=n.z+Math.cos(n.h)*n.v*dt;
+ if(canStand(nx,nz)){n.x=nx;n.z=nz;n.spd=n.v}else{n.h+=(Math.random()<.5?1:-1)*(1.2+Math.random()*1.6);n.spd=0}
+ n.y+=(groundAt(n.x,n.z)-n.y)*Math.min(1,10*dt);n.rot=turnTo(n.rot,n.h,6*dt);
+ n.m.position.set(n.x,n.y,n.z);n.m.rotation.y=n.rot;animate(n.m,dt,n.spd)}
+
+// ===== Commandes : joystick (déplacement) + glisser (caméra) =====
+let jx=0,jy=0,jid=null,yaw=0,pitch=.28,camDist=5.5,lastDrag=-9;
+const joy=document.getElementById('joy'),knob=document.getElementById('knob'),JR=44;
+function joyMove(e){const b=joy.getBoundingClientRect();let dx=e.clientX-(b.left+b.width/2),dy=e.clientY-(b.top+b.height/2);
+ const l=Math.hypot(dx,dy);if(l>JR){dx*=JR/l;dy*=JR/l}knob.style.transform='translate('+dx+'px,'+dy+'px)';
+ jx=dx/JR;jy=-dy/JR;if(Math.hypot(jx,jy)<.12){jx=0;jy=0}}
+joy.addEventListener('pointerdown',e=>{jid=e.pointerId;joy.setPointerCapture(jid);joyMove(e);e.preventDefault()});
+joy.addEventListener('pointermove',e=>{if(e.pointerId===jid)joyMove(e)});
+const joyEnd=e=>{if(e.pointerId!==jid)return;jid=null;jx=jy=0;knob.style.transform=''};
+joy.addEventListener('pointerup',joyEnd);joy.addEventListener('pointercancel',joyEnd);
+const el=r.domElement;let cid=null,cx=0,cy=0;
+el.addEventListener('pointerdown',e=>{if(cid!==null)return;cid=e.pointerId;el.setPointerCapture(cid);cx=e.clientX;cy=e.clientY});
+el.addEventListener('pointermove',e=>{if(e.pointerId!==cid)return;yaw-=(e.clientX-cx)*.005;pitch=Math.min(.9,Math.max(.08,pitch+(e.clientY-cy)*.003));cx=e.clientX;cy=e.clientY;lastDrag=performance.now()/1000});
+const cEnd=e=>{if(e.pointerId===cid)cid=null};el.addEventListener('pointerup',cEnd);el.addEventListener('pointercancel',cEnd);
+document.addEventListener('gesturestart',e=>e.preventDefault());
+function setScale(f){uf=Math.min(6,Math.max(.15,uf*f));try{localStorage.setItem('ny_scale',uf)}catch(e){}if(wrap){buildMap();spawn()}}
+document.getElementById('bm').onclick=()=>setScale(.8);document.getElementById('bp').onclick=()=>setScale(1.25);
+document.getElementById('bs').onclick=()=>{if(MAP)spawn()};
+
+// ===== Caméra 3e personne =====
+function updateCam(dt,now){
+ const hx=P.x,hy=P.y+1.6,hz=P.z;
+ if((jx||jy)&&jy>-.3&&now-lastDrag>1.2)yaw=turnTo(yaw,P.face+Math.PI,1.3*dt); // se replace doucement derrière le personnage
+ const cp=Math.cos(pitch),dx=Math.sin(yaw)*cp,dy=Math.sin(pitch),dz=Math.cos(yaw)*cp;
+ let d=5.5;for(let t=.6;t<=5.5;t+=.4){if(topAt(hx+dx*t,hz+dz*t)>hy+dy*t-.25){d=Math.max(1.1,t-.5);break}}
+ camDist+=(d-camDist)*Math.min(1,(d<camDist?14:3)*dt);
+ cam.position.set(hx+dx*camDist,hy+dy*camDist,hz+dz*camDist);
+ const gy=groundAt(cam.position.x,cam.position.z)+.3;if(cam.position.y<gy)cam.position.y=gy;
+ cam.lookAt(hx,hy+.5,hz)}
+
+// ===== Chargement =====
+function start(o){
+ clean(o);shrink(o,512);o.updateMatrixWorld(true);
+ let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
+ o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;lighten(o);
+ const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
+ wrap=new THREE.Group();wrap.add(o);scene.add(wrap);
+ buildMap();spawn();
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · Échelle −/+ si la ville est mal proportionnée';
+ setTimeout(()=>msg.style.opacity=0,7000)}
+tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
+ e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
+
+// ===== Boucle =====
+onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
+let tPrev=performance.now()/1000;
+(function loop(){requestAnimationFrame(loop);const now=performance.now()/1000,dt=Math.min(.05,now-tPrev);tPrev=now;
+ if(MAP){
+  const m=Math.min(1,Math.hypot(jx,jy));
+  if(m>0){const f=-1,fx=-Math.sin(yaw),fz=-Math.cos(yaw),rx=Math.cos(yaw),rz=-Math.sin(yaw);
+   let mx=fx*jy+rx*jx,mz=fz*jy+rz*jx;const l=Math.hypot(mx,mz)||1;mx/=l;mz/=l;
+   const v=m>.9?6:(1.5+m*2.5);P.spd=v;
+   const sx=mx*v*dt,sz=mz*v*dt;if(canStand(P.x+sx,P.z))P.x+=sx;if(canStand(P.x,P.z+sz))P.z+=sz;
+   P.face=turnTo(P.face,Math.atan2(mx,mz),10*dt)}else P.spd=0;
+  P.y+=(groundAt(P.x,P.z)-P.y)*Math.min(1,12*dt);
+  P.m.position.set(P.x,P.y,P.z);P.m.rotation.y=P.face;animate(P.m,dt,P.spd);
+  npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now)}
+ else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
+ r.render(scene,cam)})();
 </script></body></html>
