@@ -16,7 +16,7 @@ button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;pad
 #knob{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#9fd8ff 45%,#3a7fc0);box-shadow:0 2px 8px #0008;pointer-events:none}
 </style></head><body>
 <div id="msg">Chargement…</div>
-<div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button><button id="clk">12:00</button><button id="bpz">⏸</button><button id="bnx">Phase ▶</button><button id="be1">Lumière −</button><button id="be2">Lumière +</button><button id="bsh">Ombres : non</button><button id="bi">Inspecter</button></div>
+<div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button><button id="clk">12:00</button><button id="bpz">⏸</button><button id="bnx">Phase ▶</button><button id="be1">Lumière −</button><button id="be2">Lumière +</button><button id="bsh">Ombres : oui</button><button id="bi">Inspecter</button></div>
 <div id="insp"><pre id="ii">Touche un objet de la ville pour voir son nom.</pre><div class="ir"><button id="ih">Masquer</button><button id="in">Même nom</button><button id="im">Même matériau</button></div><div class="ir"><button id="iu">Annuler</button><button id="il">Liste</button><button id="il2">Lampe</button><button id="iw">Fenêtre</button></div><textarea id="it" readonly></textarea></div>
 <div id="joy"><div id="knob"></div></div>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
@@ -46,7 +46,7 @@ const _a=SKY.sunAz*Math.PI/180,_e=SKY.sunEl*Math.PI/180;
 const SUNDIR=new THREE.Vector3(Math.cos(_e)*Math.cos(_a),Math.sin(_e),Math.cos(_e)*Math.sin(_a)).normalize(); // même repère que l'équirectangulaire three.js
 const sun=new THREE.DirectionalLight(0xfff0d8,SKY.sunI);sun.position.copy(SUNDIR).multiplyScalar(300);scene.add(sun,sun.target);
 {const sc=sun.shadow.camera;sc.left=sc.bottom=-90;sc.right=sc.top=90;sc.near=1;sc.far=700;sun.shadow.mapSize.set(2048,2048);sun.shadow.bias=-0.0004;sun.shadow.normalBias=0.4}
-let SHADOWS=false;
+let SHADOWS=true; // ombres toujours actives
 function applyShadows(){sun.castShadow=SHADOWS;scene.traverse(o=>{if(o.isMesh&&o!==ground&&o!==skyDome&&o.parent!==FX){o.castShadow=SHADOWS;o.receiveShadow=SHADOWS;if(o.material)[].concat(o.material).forEach(m=>m.needsUpdate=true)}});
  ground.receiveShadow=SHADOWS;ground.material.needsUpdate=true}
 // ===== Cycle jour / nuit : 4 ciels (jour, coucher, crépuscule, nuit) + versions tournées de 180° pour l'aube et le lever =====
@@ -62,9 +62,19 @@ const K=[
  {n:'Aube',      sky:2,off:.5, az:121.5,el:22,  sc:0xa9b8e0,si:.45, hs:0x7f98c8,hg:0x2a2e3a,hi:.30,fog:0x62788a,env:1.6,lamp:.55,win:.45,h:28.5},
  {n:'Lever',     sky:1,off:.5, az:-180, el:4,   sc:0xff9a52,si:1.8, hs:0xffb27a,hg:0x3a3040,hi:.22,fog:0x968c8c,env:1.3,lamp:.08,win:.05,h:30}];
 K.forEach(o=>{const a=o.az*DEG,e=o.el*DEG;o.d=new THREE.Vector3(Math.cos(e)*Math.cos(a),Math.sin(e),Math.cos(e)*Math.sin(a))});
-const TOD={t:0,paused:false,lamp:0,lastEnv:0,envKey:'',label:'Jour'};
+// ---- Trajectoire CONTINUE du soleil et de la lune : l'azimut avance sans cesse (jamais de saut entre deux phases) ; les images de ciel sont tournées pour que le disque visible suive toujours la vraie lumière ----
+const IMGAZ=[-1.2,0,-58.5,40]; // azimut du soleil / de la lune DANS chacune des 4 images de ciel
+K.forEach((o,i)=>{o.m=[0,0,1,1,1,0][i]; // 0 = la lumière principale est le soleil · 1 = la lune
+ const R=h=>[(h>>16&255)/255,(h>>8&255)/255,(h&255)/255];o.C={sc:R(o.sc),hs:R(o.hs),hg:R(o.hg),fog:R(o.fog)}});
+const azSun=h=>{const x=h>=24?h-24:h;return -1.2+180*(x-12)/13.5};          // lever ≈ 6 h · midi = azimut d'origine · coucher ≈ 19 h 30
+const elSun=h=>{const x=h>=24?h-24:h;return 4+21.43*Math.sin(Math.PI*(x-6)/13.5)};
+const azMoon=h=>-81.2+180*(Math.min(30.08,Math.max(19.42,h))-19.42)/10.66;   // la lune se lève du côté du lever du soleil
+const elMoon=h=>49*Math.cos(Math.PI*(Math.min(30.08,Math.max(19.42,h))-24.75)/10.66);
+const cr=(a,b,c,d,x)=>.5*(2*b+(c-a)*x+(2*a-5*b+4*c-d)*x*x+(3*b-a-3*c+d)*x*x*x); // Catmull-Rom : la vitesse reste continue d'une phase à l'autre (plus de « stop-and-go »)
+const c01=x=>x<0?0:x>1?1:x;
+const TOD={t:0,paused:false,lamp:0,lastEnv:0,envKey:'',label:'Jour',goal:null};
 const WIN={value:0};
-let SKYREADY=false,SKY_TEX=null,ENVIMG=null,ENVCV=null,ENVTEX=null,ENVRT=null,PM=null;
+let SKYREADY=false,SKY_TEX=null,ENVIMG=null,ENVCV=null,ENVTEX=null,ENVRT=null,ENVSM=null,PM=null;
 const skyMat=new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,fog:false,
  uniforms:{tA:{value:null},tB:{value:null},oA:{value:0},oB:{value:0},mixF:{value:0}},
  vertexShader:'varying vec3 vD;void main(){vD=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);gl_Position.z=gl_Position.w*0.9999;}',
@@ -82,26 +92,32 @@ async function initSky(){
  const bg=await Promise.all(SKYS.map(s=>loadImg(s.bg))),en=await Promise.all(SKYS.map(s=>loadImg(s.env)));
  if(bg.includes(null)||en.includes(null)){console.warn('Ciels : chargement impossible');return}
  SKY_TEX=bg.map(im=>{const t=new THREE.Texture(im);t.generateMipmaps=false;t.minFilter=THREE.LinearFilter;t.magFilter=THREE.LinearFilter;t.needsUpdate=true;return t});
- ENVIMG=en;ENVCV=document.createElement('canvas');ENVCV.width=512;ENVCV.height=256;
+ ENVIMG=en;ENVSM=en.map(im=>{const c=document.createElement('canvas');c.width=256;c.height=128;c.getContext('2d').drawImage(im,0,0,256,128);return c});ENVCV=document.createElement('canvas');ENVCV.width=256;ENVCV.height=128;
  ENVTEX=new THREE.CanvasTexture(ENVCV);ENVTEX.mapping=THREE.EquirectangularReflectionMapping;ENVTEX.encoding=THREE.sRGBEncoding;
  PM=new THREE.PMREMGenerator(r);PM.compileEquirectangularShader();
  SKYREADY=true;skyDome.visible=true;TOD.envKey='';applyTOD(performance.now()/1000)}
 // Éclairage ambiant = mélange des deux ciels (versions « HDR ») recalculé pendant les transitions
-function redrawEnv(A,B,f){
- const g=ENVCV.getContext('2d'),W=ENVCV.width,H=ENVCV.height;
- g.globalCompositeOperation='source-over';g.globalAlpha=1;g.fillStyle='#000';g.fillRect(0,0,W,H);g.globalCompositeOperation='lighter';
- const draw=(o,w)=>{const im=ENVIMG[o.sky],dx=-o.off*W;while(w>.004){g.globalAlpha=Math.min(1,w);g.drawImage(im,dx-W,0,W,H);g.drawImage(im,dx,0,W,H);g.drawImage(im,dx+W,0,W,H);w-=1}};
- draw(A,(1-f)*A.env);draw(B,f*B.env);g.globalAlpha=1;
- ENVTEX.needsUpdate=true;const rt=PM.fromEquirectangular(ENVTEX);if(ENVRT)ENVRT.dispose();ENVRT=rt;scene.environment=rt.texture}
+function redrawEnv(A,B,fs,envI,oA,oB){ // éclairage ambiant = mélange des deux ciels, tournés comme le ciel visible ; même cible GPU réutilisée (pas d'allocation → pas d'à-coup)
+  const g=ENVCV.getContext('2d'),W=ENVCV.width,H=ENVCV.height;
+  g.globalCompositeOperation='source-over';g.globalAlpha=1;g.fillStyle='#000';g.fillRect(0,0,W,H);g.globalCompositeOperation='lighter';
+  const draw=(sky,o,w)=>{const im=ENVSM[sky],dx=-o*W;while(w>.004){g.globalAlpha=Math.min(1,w);g.drawImage(im,dx-W,0,W,H);g.drawImage(im,dx,0,W,H);g.drawImage(im,dx+W,0,W,H);w-=1}};
+  draw(A.sky,oA,(1-fs)*envI);draw(B.sky,oB,fs*envI);g.globalAlpha=1;
+  ENVTEX.needsUpdate=true;const rt=PM.fromEquirectangular(ENVTEX,ENVRT);if(ENVRT&&rt!==ENVRT)ENVRT.dispose();ENVRT=rt;scene.environment=rt.texture}
 function applyTOD(now){
- const t=TOD.t,k=Math.floor(t/KD)%NK,A=K[k],B=K[(k+1)%NK],s=(t-k*KD)/KD,f=smt(.12,.88,s),L=(a,b)=>a+(b-a)*f;
- if(SKYREADY){const u=skyMat.uniforms;u.tA.value=SKY_TEX[A.sky];u.tB.value=SKY_TEX[B.sky];u.oA.value=A.off;u.oB.value=B.off;u.mixF.value=f}
- SUNDIR.copy(A.d).lerp(B.d,f).normalize();
- mixC(sun.color,A.sc,B.sc,f);sun.intensity=L(A.si,B.si);
- mixC(hemi.color,A.hs,B.hs,f);mixC(hemi.groundColor,A.hg,B.hg,f);hemi.intensity=L(A.hi,B.hi);
- mixC(scene.fog.color,A.fog,B.fog,f);scene.background.copy(scene.fog.color);
- TOD.lamp=L(A.lamp,B.lamp);WIN.value=L(A.win,B.win);TOD.label=(f<.5?A:B).n;
- if(SKYREADY){const key=k+'|'+Math.round(f*40);if(key!==TOD.envKey&&now-TOD.lastEnv>.25){TOD.envKey=key;TOD.lastEnv=now;redrawEnv(A,B,f)}}}
+  const t=TOD.t,k=Math.floor(t/KD)%NK,A=K[k],B=K[(k+1)%NK],Z=K[(k+NK-1)%NK],Y=K[(k+2)%NK],s=(t-k*KD)/KD,fs=smt(.08,.92,s),h=hourOf(t);
+  const L=n=>cr(Z[n],A[n],B[n],Y[n],s),col=(n,d)=>d.setRGB(c01(cr(Z.C[n][0],A.C[n][0],B.C[n][0],Y.C[n][0],s)),c01(cr(Z.C[n][1],A.C[n][1],B.C[n][1],Y.C[n][1],s)),c01(cr(Z.C[n][2],A.C[n][2],B.C[n][2],Y.C[n][2],s)));
+  const rot=o=>(((IMGAZ[o.sky]-(o.m?azMoon(h):azSun(h)))/360)%1+1)%1,oA=rot(A),oB=rot(B);
+  if(SKYREADY){const u=skyMat.uniforms;u.tA.value=SKY_TEX[A.sky];u.tB.value=SKY_TEX[B.sky];u.oA.value=oA;u.oB.value=oB;u.mixF.value=fs}
+  // lumière principale (soleil ou lune) : trajectoire continue ; quand on passe du soleil à la lune elle s'éteint d'abord complètement (aucun saut d'ombre visible)
+  const hand=A.m!==B.m,moon=hand?(s<.5?A.m:B.m):A.m,dip=hand?smt(0,1,Math.abs(2*s-1)):1;
+  const az=(moon?azMoon(h):azSun(h))*DEG,el=Math.max(5,moon?elMoon(h):elSun(h))*DEG;
+  SUNDIR.set(Math.cos(el)*Math.cos(az),Math.sin(el),Math.cos(el)*Math.sin(az));
+  col('sc',sun.color);sun.intensity=Math.max(0,L('si'))*dip;sun.shadow.normalBias=.3+.5*Math.max(0,1-el/(25*DEG));
+  col('hs',hemi.color);col('hg',hemi.groundColor);hemi.intensity=Math.max(0,L('hi'));
+  col('fog',scene.fog.color);scene.background.copy(scene.fog.color);
+  TOD.lamp=c01(L('lamp'));WIN.value=c01(L('win'));TOD.label=(s<.5?A:B).n;
+  if(SKYREADY){const envI=Math.max(0,L('env')),key=A.sky+'|'+B.sky+'|'+Math.round(fs*300)+'|'+Math.round(oA*400)+'|'+Math.round(oB*400)+'|'+Math.round(envI*150);
+   if(key!==TOD.envKey&&now-TOD.lastEnv>.1){TOD.envKey=key;TOD.lastEnv=now;redrawEnv(A,B,fs,envI,oA,oB)}}}
 
 // ===== Fenêtres allumées la nuit =====
 // 1) Chaque texture de façade est analysée une fois : les vitres (zones sombres rectangulaires) sont repérées une par une et reçoivent un identifiant → « carte des fenêtres ».
@@ -214,8 +230,8 @@ const GLOW=(()=>{const c=document.createElement('canvas');c.width=c.height=64;co
  g.fillStyle=gr;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c)})();
 const FX=new THREE.Group();scene.add(FX);
 const LAMPS=[],LAMPRE=/lamp|lantern|luminair|street_?light|light_?pole|lampadaire|bulb/i;
-let haloMat=null,poolMat=null;
-const PL=[0,1,2,3].map(()=>{const l=new THREE.PointLight(0xffc27a,0,26,1.6);l._on=false;scene.add(l);return l});
+let haloMat=null,poolMat=null,lampCol=null,poolIm=null,LAMPB=new Float32Array(0),LAMPTH=LAMPB,LAMPPH=LAMPB,_lampAny=false;
+const PL=[0,1,2,3].map(()=>{const l=new THREE.PointLight(0xffc27a,0,26,1.6);l._have=null;l._want=null;scene.add(l);return l}); // 4 vraies lumières qui suivent le joueur (changement de lampe en fondu)
 function isLampMesh(c){if(LAMPNAMES.has(c.name)||LAMPRE.test(c.name||''))return true;
  for(const m of [].concat(c.material))if(m&&m.name&&LAMPRE.test(m.name))return true;
  for(let p=c.parent,i=0;p&&p!==wrap&&i<4;p=p.parent,i++)if(p.name&&LAMPRE.test(p.name))return true;return false}
@@ -230,29 +246,61 @@ function findLampsH(){ // repli : objets fins et hauts sur la carte des hauteurs
  c.sort((a,b)=>M.H[b]-M.H[a]);return suppress(c.map(k=>{const xz=cellXZ(k);return{x:xz[0],y:M.H[k],z:xz[1]}}),7)}
 function buildLights(){try{return buildLights0()}catch(e){console.warn(e);return 'erreur'}}
 function buildLights0(){
- for(const c of [...FX.children]){FX.remove(c);if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose()}
- let list=findLamps(),how='noms';if(list.length<3){list=findLampsH();how='carte'}
- LAMPS.length=0;list.forEach(p=>LAMPS.push(p));haloMat=poolMat=null;if(!LAMPS.length)return how;
- const n=LAMPS.length,pos=new Float32Array(n*3),gm=new THREE.BufferGeometry();
- LAMPS.forEach((p,i)=>{pos[i*3]=p.x;pos[i*3+1]=p.y-.3;pos[i*3+2]=p.z});gm.setAttribute('position',new THREE.BufferAttribute(pos,3));
- haloMat=new THREE.PointsMaterial({map:GLOW,color:0xffb866,size:3.2,sizeAttenuation:true,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
- const pts=new THREE.Points(gm,haloMat);pts.frustumCulled=false;FX.add(pts);
- poolMat=new THREE.MeshBasicMaterial({map:GLOW,color:0xffb866,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
- const im=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),poolMat,n),m4=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(13,1,13),pp=new THREE.Vector3();
- LAMPS.forEach((p,i)=>{m4.compose(pp.set(p.x,groundAt(p.x,p.z)+.12,p.z),q,sc);im.setMatrixAt(i,m4)});im.frustumCulled=false;FX.add(im);
- return how}
-function nearLamps(){const best=[];
- for(const p of LAMPS){const dx=p.x-P.x,dz=p.z-P.z,d=dx*dx+dz*dz;if(best.length<4||d<best[best.length-1].d){best.push({p,d});best.sort((a,b)=>a.d-b.d);if(best.length>4)best.pop()}}
- PL.forEach((l,i)=>{const b=best[i];l._on=!!b;if(b)l.position.set(b.p.x,b.p.y-.6,b.p.z)})}
+  for(const c of [...FX.children]){FX.remove(c);if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose()}
+  let list=findLamps(),how='noms';if(list.length<3){list=findLampsH();how='carte'}
+  LAMPS.length=0;list.forEach(p=>LAMPS.push(p));haloMat=poolMat=lampCol=poolIm=null;
+  const n=LAMPS.length;LAMPB=new Float32Array(n);LAMPTH=new Float32Array(n);LAMPPH=new Float32Array(n);_lampAny=false;
+  PL.forEach(l=>{l._have=l._want=null;l.intensity=0});if(!n)return how;
+  const pos=new Float32Array(n*3);
+  LAMPS.forEach((p,i)=>{pos[i*3]=p.x;pos[i*3+1]=p.y-.3;pos[i*3+2]=p.z;
+   // chaque lampadaire a son propre seuil d'allumage : un peu de hasard + une « vague » qui parcourt la ville → ils ne s'allument jamais tous ensemble
+   let h=Math.imul(Math.round(p.x*10)^0x9e3779b1,0x85ebca6b)^Math.imul(Math.round(p.z*10)^0x51ed270b,0xc2b2ae35);h^=h>>>13;h=Math.imul(h,0x27d4eb2f);h^=h>>>15;h>>>=0;
+   const r1=(h&0xffff)/65535,r2=(h>>>16)/65535,sw=.5+.5*Math.sin(p.x*.013+1.3)*Math.cos(p.z*.011);
+   LAMPTH[i]=.04+.84*(.7*r1+.3*sw);LAMPPH[i]=r2*6.2832});
+  const posA=new THREE.BufferAttribute(pos,3);lampCol=new THREE.BufferAttribute(new Float32Array(n*3),3);lampCol.setUsage(THREE.DynamicDrawUsage);
+  const mk=(size,op)=>{const g=new THREE.BufferGeometry();g.setAttribute('position',posA);g.setAttribute('color',lampCol);
+   const m=new THREE.PointsMaterial({map:GLOW,color:0xffb866,vertexColors:true,size,sizeAttenuation:true,transparent:true,opacity:op,blending:THREE.AdditiveBlending,depthWrite:false});
+   const pts=new THREE.Points(g,m);pts.frustumCulled=false;FX.add(pts);return m};
+  mk(10,.2);haloMat=mk(3.2,.6); // voile diffus + cœur lumineux
+  poolMat=new THREE.MeshBasicMaterial({map:GLOW,color:0xffb866,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+  poolIm=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),poolMat,n);const m4=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(13,1,13),pp=new THREE.Vector3();
+  LAMPS.forEach((p,i)=>{m4.compose(pp.set(p.x,groundAt(p.x,p.z)+.12,p.z),q,sc);poolIm.setMatrixAt(i,m4)});
+  poolIm.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(n*3),3);poolIm.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  poolIm.frustumCulled=false;FX.add(poolIm);
+  return how}
+// allume chaque lampadaire séparément selon le niveau « nuit » (TOD.lamp) ; petit scintillement pendant l'allumage
+function updateLampFX(now,Lv){
+  const n=LAMPS.length;if(!n||!lampCol||!poolIm)return false;
+  const ca=lampCol.array,pa=poolIm.instanceColor.array;let any=false;
+  for(let i=0;i<n;i++){const th=LAMPTH[i];let b=smt(th,th+.07,Lv);
+   if(b>0&&b<1)b*=1-(1-b)*.55*(.5+.5*Math.sin(now*37+LAMPPH[i]*11)*Math.sin(now*11.3+LAMPPH[i]*7));
+   LAMPB[i]=b;if(b>.004)any=true;ca[i*3]=ca[i*3+1]=ca[i*3+2]=b;pa[i*3]=pa[i*3+1]=pa[i*3+2]=b}
+  if(any||_lampAny){lampCol.needsUpdate=true;poolIm.instanceColor.needsUpdate=true}
+  _lampAny=any;return any}
+// choisit les 4 lampes ALLUMÉES les plus proches ; une lampe déjà choisie est conservée tant qu'elle reste dans les 4 (pas de lumière qui saute)
+function nearLamps(){const cand=[];
+  for(let i=0;i<LAMPS.length;i++){if(LAMPB[i]<.05)continue;const p=LAMPS[i],dx=p.x-P.x,dz=p.z-P.z;cand.push({i,d:dx*dx+dz*dz})}
+  cand.sort((a,b)=>a.d-b.d);const best=cand.slice(0,PL.length).map(c=>c.i),keep=new Set();
+  PL.forEach(l=>{if(l._want!==null&&best.includes(l._want))keep.add(l._want);else l._want=null});
+  const rest=best.filter(i=>!keep.has(i));PL.forEach(l=>{if(l._want===null&&rest.length)l._want=rest.shift()})}
+// ombre du soleil / de la lune : la caméra d'ombre suit le joueur, calée sur la grille de texels DANS L'ESPACE DE LA LUMIÈRE (pas de scintillement pendant que le soleil tourne)
+function placeSun(){
+  const z=SUNDIR,xl=Math.hypot(z.z,z.x)||1,xx=z.z/xl,xz=-z.x/xl,yx=z.y*xz,yy=z.z*xx-z.x*xz,yz=-z.y*xx,q=2*180/2048;
+  const a=P.x*xx+P.z*xz,b=P.x*yx+P.y*yy+P.z*yz,da=a-Math.round(a/q)*q,db=b-Math.round(b/q)*q;
+  sun.target.position.set(P.x-da*xx-db*yx,P.y-db*yy,P.z-da*xz-db*yz);sun.target.updateMatrixWorld();
+  sun.position.copy(sun.target.position).addScaledVector(SUNDIR,300)}
 let _lt=0,_ck=0;
 function todStep(dt,now){
- if(!TOD.paused)TOD.t=(TOD.t+dt)%CYC;
- applyTOD(now);WINT.value=now%628.318;skyDome.position.copy(cam.position);
- const on=smt(0,1,TOD.lamp);FX.visible=on>.01&&LAMPS.length>0;
- if(haloMat){haloMat.opacity=.6*on;poolMat.opacity=.28*on}
- if(now-_lt>.3){_lt=now;if(MAP&&LAMPS.length&&on>.01)nearLamps()}
- PL.forEach(l=>l.intensity+=((l._on?on*6:0)-l.intensity)*Math.min(1,dt*4));
- if(now-_ck>.25){_ck=now;const h=hourOf(TOD.t)%24;document.getElementById('clk').textContent=pad2(Math.floor(h))+':'+pad2(Math.floor((h%1)*60))+' · '+TOD.label}}
+  // « Phase ▶ » : on accélère jusqu'à la phase suivante (au lieu de sauter d'un coup)
+  if(TOD.goal!=null){const d=(TOD.goal-TOD.t+CYC)%CYC,st=dt*12;if(st>=d){TOD.t=TOD.goal;TOD.goal=null}else TOD.t=(TOD.t+st)%CYC}
+  else if(!TOD.paused)TOD.t=(TOD.t+dt)%CYC;
+  applyTOD(now);WINT.value=now%628.318;skyDome.position.copy(cam.position);if(MAP)placeSun();
+  const any=updateLampFX(now,TOD.lamp);FX.visible=any;
+  if(now-_lt>.3){_lt=now;if(MAP&&any)nearLamps()}
+  PL.forEach(l=>{
+   if(l._want!==l._have){l.intensity+=(0-l.intensity)*Math.min(1,dt*10);if(l.intensity<.1){l.intensity=0;l._have=l._want;if(l._have!==null){const p=LAMPS[l._have];l.position.set(p.x,p.y-.6,p.z)}}}
+   else l.intensity+=((l._have!==null?LAMPB[l._have]*6:0)-l.intensity)*Math.min(1,dt*5)});
+  if(now-_ck>.25){_ck=now;const h=hourOf(TOD.t)%24;document.getElementById('clk').textContent=pad2(Math.floor(h))+':'+pad2(Math.floor((h%1)*60))+' · '+TOD.label}}
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x4a4e52,roughness:1}));
 ground.rotation.x=-Math.PI/2;scene.add(ground);
 const msg=document.getElementById('msg');
@@ -513,7 +561,7 @@ document.getElementById('bs').onclick=()=>{if(MAP)spawn()};
 const setExpo=f=>{r.toneMappingExposure=clamp(r.toneMappingExposure*f,.3,3);try{localStorage.setItem('ny_expo_day',r.toneMappingExposure)}catch(e){}msg.style.opacity=1;msg.textContent='Exposition : '+r.toneMappingExposure.toFixed(2);setTimeout(()=>msg.style.opacity=0,1500)};
 document.getElementById('be1').onclick=()=>setExpo(.85);document.getElementById('be2').onclick=()=>setExpo(1.18);
 document.getElementById('bpz').onclick=e=>{TOD.paused=!TOD.paused;e.target.textContent=TOD.paused?'▶':'⏸'};
-document.getElementById('bnx').onclick=()=>{TOD.t=((Math.floor(TOD.t/KD+1e-6)+1)*KD)%CYC;TOD.envKey=''};
+document.getElementById('bnx').onclick=()=>{TOD.goal=((Math.floor(TOD.t/KD+1e-6)+1)*KD)%CYC;TOD.envKey=''};
 document.getElementById('bsh').onclick=e=>{SHADOWS=!SHADOWS;e.target.textContent='Ombres : '+(SHADOWS?'oui':'non');applyShadows()};
 
 // ===== Caméra 3e personne =====
@@ -567,7 +615,7 @@ let tPrev=performance.now()/1000;
   P.y+=(groundAt(P.x,P.z)-P.y)*Math.min(1,12*dt);
   P.m.position.set(P.x,P.y,P.z);P.m.rotation.y=P.face;animate(P.m,dt,P.spd);
   npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now);
-  const q=2*180/2048;sun.target.position.set(Math.round(P.x/q)*q,P.y,Math.round(P.z/q)*q);sun.target.updateMatrixWorld();sun.position.copy(sun.target.position).addScaledVector(SUNDIR,300)}
+  }
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
  todStep(dt,now);
  try{r.render(scene,cam)}catch(e){if(!restoreTrees(e)){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
