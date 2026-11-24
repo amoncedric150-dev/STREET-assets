@@ -23,12 +23,12 @@ const sun=new THREE.DirectionalLight(0xfff2dd,0.9);sun.position.set(200,400,150)
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x555a5e,roughness:1}));
 ground.rotation.x=-Math.PI/2;ground.position.y=-0.2;scene.add(ground);
 // ===== Petite ville : 4 modèles assemblés =====
-const R2='https://pub-7b4d28c9c7ac495bb95eceec5b276d84.r2.dev/';
+let dirty=true;const R2='https://pub-7b4d28c9c7ac495bb95eceec5b276d84.r2.dev/';
 const HALF=150,ROAD_W=16,SW=4,CURB=0.25,INNER=ROAD_W/2+SW+1,Q=HALF-INNER-4,QC=INNER+Q/2;
 const ui=document.getElementById('ui'),msg=document.getElementById('msg');
 const loader=new THREE.GLTFLoader();let base=location.href.split('?')[0].split('#')[0];base=base.replace(/[^\/]*$/,'');
 function box(w,h,d,x,y,z,c){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:c,roughness:.9}));m.position.set(x,y,z);return m}
-function addBtn(n,get){const b=document.createElement('button');b.textContent=n;ui.appendChild(b);b.onclick=()=>{const o=get();if(!o)return;o.visible=!o.visible;b.classList.toggle('off',!o.visible)}}
+function addBtn(n,get){const b=document.createElement('button');b.textContent=n;ui.appendChild(b);b.onclick=()=>{const o=get();if(!o)return;dirty=true;o.visible=!o.visible;b.classList.toggle('off',!o.visible)}}
 // Routes en croix, trottoirs, bordures, marquages, îlots de fond
 const streets=new THREE.Group(),L=HALF*2,off=ROAD_W/2+SW/2,len=HALF-ROAD_W/2-SW;
 streets.add(box(L,.1,L,0,-.12,0,0x5b5f58),box(L,.1,ROAD_W,0,-.05,0,0x2b2d31),box(ROAD_W,.1,L,0,-.04,0,0x2b2d31));
@@ -56,17 +56,23 @@ function shrink(root,max){const seen=new Set();root.traverse(o=>{if(!o.isMesh)re
  if(t&&t.isTexture&&!seen.has(t)){seen.add(t);const im=t.image;
   if(im&&im.width>max){const c=document.createElement('canvas');c.width=max;c.height=Math.max(1,Math.round(im.height*max/im.width));
    c.getContext('2d').drawImage(im,0,0,c.width,c.height);if(im.close)im.close();t.image=c;t.needsUpdate=true}}}})})}
+// Allègement : masque les petits objets très lourds (>8000 triangles dans moins de 10 unités),
+// puis fige les matrices (objets statiques)
+function lighten(o){const tmp=new THREE.Box3(),v=new THREE.Vector3();o.traverse(c=>{if(!c.isMesh||!c.geometry)return;
+ const g=c.geometry,tri=(g.index?g.index.count:g.attributes.position.count)/3;
+ if(tri>8000){g.computeBoundingBox();g.boundingBox.getSize(v);if(v.length()<10)c.visible=false}});
+ o.updateMatrixWorld(true);o.traverse(c=>{c.matrixAutoUpdate=false})}
 function tryLoad(urls,onok,onerr,onprog){const u=urls.shift();loader.load(u,onok,onprog,()=>urls.length?tryLoad(urls,onok,onerr,onprog):onerr(u))}
 items.forEach(it=>addBtn(it.n,()=>it.obj));
 function next(i){if(i>=items.length){msg.textContent='Glisse = tourner · 2 doigts = zoom/déplacer';return}
  const it=items[i];
- tryLoad([R2+it.f,base+'Models/'+it.f],g=>{const o=g.scene;clean(o,it.re);shrink(o,it.tex||512);place(o,it.opt);scene.add(o);it.obj=o;next(i+1)},
+ tryLoad([R2+it.f,base+'Models/'+it.f],g=>{const o=g.scene;clean(o,it.re);shrink(o,it.tex||512);place(o,it.opt);lighten(o);scene.add(o);it.obj=o;dirty=true;next(i+1)},
   u=>{msg.textContent='Erreur de chargement : '+u;next(i+1)},
   e=>{if(e.total)msg.textContent='Chargement '+it.n+' ('+(i+1)+'/'+items.length+') '+Math.round(e.loaded/e.total*100)+'%'})}
 next(0);
 // Contrôles tactiles
 let th=0.6,ph=1.0,dist=380;const tg=new THREE.Vector3(0,0,0);let pts=new Map(),last=0,lc=null;
-const el=r.domElement;
+const el=r.domElement;['pointermove','pointerdown','pointerup','wheel'].forEach(t=>el.addEventListener(t,()=>{dirty=true}));
 el.onpointerdown=e=>{el.setPointerCapture(e.pointerId);pts.set(e.pointerId,[e.clientX,e.clientY]);last=0};
 el.onpointerup=el.onpointercancel=e=>{pts.delete(e.pointerId);last=0;lc=null};
 el.onpointermove=e=>{if(!pts.has(e.pointerId))return;const p=pts.get(e.pointerId);const dx=e.clientX-p[0],dy=e.clientY-p[1];pts.set(e.pointerId,[e.clientX,e.clientY]);
@@ -75,7 +81,7 @@ el.onpointermove=e=>{if(!pts.has(e.pointerId))return;const p=pts.get(e.pointerId
   if(last)dist=Math.min(1500,Math.max(10,dist*last/d));last=d;
   const k=dist*0.0015,mx=(dx/2),my=(dy/2);tg.x-=(Math.cos(th)*mx+Math.sin(th)*my)*k;tg.z-=(-Math.sin(th)*mx+Math.cos(th)*my)*k}};
 el.onwheel=e=>{dist=Math.min(1500,Math.max(10,dist*(1+e.deltaY*0.001)))};
-onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
+onresize=()=>{dirty=true;cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
 (function loop(){requestAnimationFrame(loop);
- cam.position.set(tg.x+dist*Math.sin(ph)*Math.sin(th),tg.y+dist*Math.cos(ph),tg.z+dist*Math.sin(ph)*Math.cos(th));cam.lookAt(tg);r.render(scene,cam)})();
+ cam.position.set(tg.x+dist*Math.sin(ph)*Math.sin(th),tg.y+dist*Math.cos(ph),tg.z+dist*Math.sin(ph)*Math.cos(th));cam.lookAt(tg);if(dirty){r.render(scene,cam);dirty=false}})();
 </script></body></html>
