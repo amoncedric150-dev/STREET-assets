@@ -22,26 +22,45 @@ scene.add(new THREE.HemisphereLight(0xffffff,0x667788,1.1));
 const sun=new THREE.DirectionalLight(0xfff2dd,1.4);sun.position.set(200,400,150);scene.add(sun);
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x555a5e,roughness:1}));
 ground.rotation.x=-Math.PI/2;ground.position.y=-0.2;scene.add(ground);
-// Modèles : largeur cible (m) et position
-const items=[
- {f:'traffic_slam_2_map.glb',n:'Carte',w:500,x:0,z:0},
- {f:'city.glb',n:'Rue',w:120,x:360,z:0},
- {f:'Untitled.glb',n:'Bâtiments',w:100,x:-340,z:0}];
-const ui=document.getElementById('ui'),msg=document.getElementById('msg');let left=items.length;
+// ===== Petite ville : 4 modèles assemblés =====
+const R2='https://pub-7b4d28c9c7ac495bb95eceec5b276d84.r2.dev/';
+const HALF=150,ROAD_W=16,SW=4,CURB=0.25,INNER=ROAD_W/2+SW+1,Q=HALF-INNER-4,QC=INNER+Q/2;
+const ui=document.getElementById('ui'),msg=document.getElementById('msg');
 const loader=new THREE.GLTFLoader();let base=location.href.split('?')[0].split('#')[0];base=base.replace(/[^\/]*$/,'');
-items.forEach(it=>{
- const b=document.createElement('button');b.textContent=it.n;ui.appendChild(b);
- b.onclick=()=>{if(!it.obj)return;it.obj.visible=!it.obj.visible;b.classList.toggle('off',!it.obj.visible)};
- loader.load(base+'Models/'+it.f,g=>{
-  const o=g.scene;let bx=new THREE.Box3().setFromObject(o),s=bx.getSize(new THREE.Vector3());
-  o.scale.setScalar(it.w/Math.max(s.x,s.z));bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
-  o.position.set(it.x-c.x,-bx.min.y,it.z-c.z);scene.add(o);it.obj=o;
-  if(--left==0)msg.textContent='Glisse = tourner · 2 doigts = zoom/déplacer';
- },e=>{if(e.total)msg.textContent='Chargement '+it.n+' '+Math.round(e.loaded/e.total*100)+'%'},
- ()=>{fetch(base+'Models/'+it.f).then(r=>msg.textContent='Erreur '+r.status+' : '+base+'Models/'+it.f).catch(e=>msg.textContent='Erreur réseau : '+base+'Models/'+it.f)}});
-});
+function box(w,h,d,x,y,z,c){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:c,roughness:.9}));m.position.set(x,y,z);return m}
+function addBtn(n,get){const b=document.createElement('button');b.textContent=n;ui.appendChild(b);b.onclick=()=>{const o=get();if(!o)return;o.visible=!o.visible;b.classList.toggle('off',!o.visible)}}
+// Routes en croix, trottoirs, bordures, marquages, îlots de fond
+const streets=new THREE.Group(),L=HALF*2,off=ROAD_W/2+SW/2,len=HALF-ROAD_W/2-SW;
+streets.add(box(L,.1,L,0,-.12,0,0x5b5f58),box(L,.1,ROAD_W,0,-.05,0,0x2b2d31),box(ROAD_W,.1,L,0,-.04,0,0x2b2d31));
+for(const a of[-1,1])for(const b of[-1,1]){const mid=b*(ROAD_W/2+SW+len/2);
+ streets.add(box(len,CURB,SW,mid,CURB/2,a*off,0x9a9a96),box(SW,CURB,len,a*off,CURB/2,mid,0x9a9a96),
+ box(SW,CURB,SW,a*off,CURB/2,b*off,0x9a9a96),
+ box(HALF-INNER,.15,HALF-INNER,a*(INNER+(HALF-INNER)/2),.075,b*(INNER+(HALF-INNER)/2),0x77786f))}
+for(let i=-HALF+6;i<HALF;i+=12){if(Math.abs(i)<ROAD_W)continue;streets.add(box(5,.02,.3,i,.06,0,0xe8c547),box(.3,.02,5,0,.07,i,0xe8c547))}
+scene.add(streets);addBtn('Routes',()=>streets);
+// Nettoyage : points/lignes parasites, collisions, lightmaps, mer, matériaux alpha 0
+function clean(root,re){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push(o);else if(o.isMesh&&re&&(re.test(o.name)||re.test(o.parent&&o.parent.name||'')))k.push(o)});
+ k.forEach(o=>o.parent&&o.parent.remove(o));
+ root.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&m.transparent&&m.opacity===0)m.visible=false})})}
+// Mise à l'échelle dans un carré, socle à y=0, centrage, rotation
+function place(o,{size,cx,cz,rotY=0,maxScale=Infinity}){o.rotation.y=rotY;o.updateMatrixWorld(true);
+ let bx=new THREE.Box3().setFromObject(o),s=bx.getSize(new THREE.Vector3());o.scale.multiplyScalar(Math.min(size/Math.max(s.x,s.z),maxScale));
+ o.updateMatrixWorld(true);bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
+ o.position.x+=cx-c.x;o.position.z+=cz-c.z;o.position.y+=-bx.min.y}
+const items=[
+ {f:'new_york_city.glb',n:'New York',opt:{size:Q,cx:QC,cz:-QC}},
+ {f:'Untitled.glb',n:'Bâtiments',opt:{size:Q*.9,cx:-QC,cz:-QC,maxScale:1.2}},
+ {f:'city.glb',n:'Rue',opt:{size:Q,cx:-QC,cz:QC,rotY:Math.PI/2}},
+ {f:'traffic_slam_2_map.glb',n:'Carte',re:/collision|invisiblewall|lightmap|sea|water|ocean/i,opt:{size:Q,cx:QC,cz:QC}}];
+let left=items.length;
+function tryLoad(urls,onok,onerr,onprog){const u=urls.shift();loader.load(u,onok,onprog,()=>urls.length?tryLoad(urls,onok,onerr,onprog):onerr(u))}
+items.forEach(it=>{addBtn(it.n,()=>it.obj);
+ tryLoad([R2+it.f,base+'Models/'+it.f],g=>{const o=g.scene;clean(o,it.re);place(o,it.opt);scene.add(o);it.obj=o;
+  if(--left==0)msg.textContent='Glisse = tourner · 2 doigts = zoom/déplacer'},
+  u=>{msg.textContent='Erreur de chargement : '+u+' (CORS ou fichier absent ?)'},
+  e=>{if(e.total)msg.textContent='Chargement '+it.n+' '+Math.round(e.loaded/e.total*100)+'%'})});
 // Contrôles tactiles
-let th=0.6,ph=1.0,dist=500;const tg=new THREE.Vector3(0,0,0);let pts=new Map(),last=0,lc=null;
+let th=0.6,ph=1.0,dist=380;const tg=new THREE.Vector3(0,0,0);let pts=new Map(),last=0,lc=null;
 const el=r.domElement;
 el.onpointerdown=e=>{el.setPointerCapture(e.pointerId);pts.set(e.pointerId,[e.clientX,e.clientY]);last=0};
 el.onpointerup=el.onpointercancel=e=>{pts.delete(e.pointerId);last=0;lc=null};
