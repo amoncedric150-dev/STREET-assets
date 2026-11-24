@@ -1,257 +1,57 @@
 <!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Ville GTA</title>
-<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/babylonjs@7.30.0/babylon.js"></script>
-<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/babylonjs-loaders@7.30.0/babylonjs.loaders.min.js"></script>
+<meta name="apple-mobile-web-app-capable" content="yes"><title>Ville 3D</title>
 <style>
-html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:none;-webkit-user-select:none;user-select:none;font-family:-apple-system,sans-serif}
-#c{width:100%;height:100%;display:block;outline:none}
-#load{position:fixed;inset:0;background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50}
-#lt{padding:0 16px;text-align:center;font-size:13px;word-break:break-word}
-#bar{width:70%;height:10px;background:#333;border-radius:5px;overflow:hidden;margin-top:16px}
-#fill{height:100%;width:0;background:#4ade80}
-#joy{position:fixed;left:24px;bottom:calc(40px + env(safe-area-inset-bottom));width:130px;height:130px;border-radius:50%;background:#ffffff22;border:2px solid #ffffff55}
-#knob{position:absolute;left:40px;top:40px;width:50px;height:50px;border-radius:50%;background:#ffffffaa}
-.btn{position:fixed;right:24px;width:68px;height:68px;border-radius:50%;background:#ffffff33;border:2px solid #fff8;color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center}
-#bJump{bottom:calc(120px + env(safe-area-inset-bottom))}
-#bSprint{bottom:calc(40px + env(safe-area-inset-bottom))}
-#bDbg{position:fixed;top:calc(10px + env(safe-area-inset-top));right:10px;font-size:26px;background:#0006;border-radius:8px;padding:2px 8px;color:#fff}
-#dbg{position:fixed;top:calc(52px + env(safe-area-inset-top));right:10px;width:230px;background:#000b;color:#fff;font-size:12px;padding:8px;border-radius:8px;display:none;z-index:20}
-#dbg button{margin:2px;padding:6px;font-size:12px} #dbg input{width:44px}
+html,body{margin:0;height:100%;overflow:hidden;background:#9fc4e8;font-family:system-ui,sans-serif;touch-action:none}
+canvas{display:block}
+#ui{position:fixed;left:0;right:0;bottom:0;padding:10px 10px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;padding:10px 14px;font-size:14px}
+button.off{opacity:.4}
+#msg{position:fixed;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;color:#fff;background:#000a;border-radius:10px;padding:8px 12px;font-size:13px}
 </style></head><body>
-<canvas id="c"></canvas>
-<div id="load"><div id="lt">Chargement…</div><div id="bar"><div id="fill"></div></div></div>
-<div id="joy"><div id="knob"></div></div>
-<div class="btn" id="bJump">Saut</div><div class="btn" id="bSprint">Sprint</div>
-<div id="bDbg">🔍</div><div id="dbg"></div>
+<div id="msg">Chargement…</div><div id="ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
-/* diagnostic : affiche tout de suite la version et la moindre erreur à l'écran */
-const VERSION="v5";
-(function(){const t=document.getElementById("lt");t.textContent="Démarrage ("+VERSION+")…";
-  window.addEventListener("error",e=>{t.textContent="Erreur "+VERSION+" : "+(e.message||"inconnue")+(e.lineno?" (ligne "+e.lineno+")":"")+(e.error&&e.error.stack?" | "+String(e.error.stack).slice(0,350):"");});
-  if(typeof BABYLON==="undefined"){t.textContent="Erreur "+VERSION+" : Babylon.js n'a pas pu se charger (connexion ou CDN bloqué).";}
-  else if(!BABYLON.SceneLoader||!BABYLON.GLTFFileLoader&&!BABYLON.SceneLoader.IsPluginForExtensionAvailable(".glb")){t.textContent="Erreur "+VERSION+" : le chargeur de modèles .glb n'a pas pu se charger.";}})();
-/* ===================== RÉGLAGES (à modifier ici) ===================== */
-const BASE="./models/"; // les 3 modèles sont dans le dossier models/ de ton dépôt
-const MODELS={
-  center:{file:"centre.glb",scale:1,tex:1024,label:"Centre-ville"},
-  hood:{file:"quartier.glb",scale:1,tex:512,cols:2,rows:4,label:"Quartier"},
-  hk:{file:"hongkong.glb",scale:5,tex:512,copies:2,label:"Hong Kong"}
-};
-const GAP=14;          // largeur de la route entre 2 zones (m)
-const SIDEWALK=3;      // largeur des trottoirs (m)
-const HW_SCALE=1.5;    // 1 = net, 2 = plus fluide
-const CELL=2;          // taille des cases de collision (m)
-/* ===================================================================== */
-try{const s=JSON.parse(localStorage.getItem("scales")||"{}");for(const k in s)if(MODELS[k])MODELS[k].scale=s[k];}catch(e){}
-const V3=BABYLON.Vector3, $=id=>document.getElementById(id);
-const canvas=$("c"), engine=new BABYLON.Engine(canvas,false,{powerPreference:"high-performance"});
-engine.setHardwareScalingLevel(HW_SCALE);
-const scene=new BABYLON.Scene(engine);
-scene.clearColor=new BABYLON.Color4(.55,.75,.95,1);
-scene.fogMode=BABYLON.Scene.FOGMODE_LINEAR;scene.fogStart=180;scene.fogEnd=520;scene.fogColor=new BABYLON.Color3(.55,.75,.95);
-scene.skipPointerMovePicking=true;
-new BABYLON.HemisphericLight("h",new V3(0,1,0),1.0);
-const sun=new BABYLON.DirectionalLight("s",new V3(-.4,-1,-.3),scene);sun.intensity=1.2;
-const cam=new BABYLON.FreeCamera("cam",new V3(0,5,-8),scene);cam.minZ=.3;cam.maxZ=700;cam.fov=1.0;
-
-/* ---------- collisions : cases occupées ---------- */
-const solid=new Set(), key=(ix,iz)=>(ix+4096)*8192+(iz+4096);
-const isSolid=(x,z)=>solid.has(key(Math.floor(x/CELL),Math.floor(z/CELL)));
-function collect(meshes){
-  const out=new Set();
-  for(const m of meshes){
-    const bb=m.getBoundingInfo().boundingBox;
-    if(bb.maximumWorld.y-bb.minimumWorld.y<2.5)continue;
-    const p=m.getVerticesData("position"),idx=m.getIndices();if(!p||!idx)continue;
-    const W=m.getWorldMatrix().m,n=p.length/3,w=new Float32Array(p.length);
-    for(let i=0;i<n;i++){const x=p[3*i],y=p[3*i+1],z=p[3*i+2];
-      w[3*i]=x*W[0]+y*W[4]+z*W[8]+W[12];w[3*i+1]=x*W[1]+y*W[5]+z*W[9]+W[13];w[3*i+2]=x*W[2]+y*W[6]+z*W[10]+W[14];}
-    const edge=(a,b)=>{const ax=w[a],ay=w[a+1],az=w[a+2],bx=w[b],by=w[b+1],bz=w[b+2];
-      const st=Math.min(400,Math.ceil(Math.hypot(bx-ax,bz-az))||1);
-      for(let s=0;s<=st;s++){const t=s/st;if(ay+(by-ay)*t<.6)continue;
-        out.add(key(Math.floor((ax+(bx-ax)*t)/CELL),Math.floor((az+(bz-az)*t)/CELL)));}};
-    for(let i=0;i<idx.length;i+=3){const a=idx[i]*3,b=idx[i+1]*3,c=idx[i+2]*3;
-      if(w[a+1]<.6&&w[b+1]<.6&&w[c+1]<.6)continue;edge(a,b);edge(b,c);edge(c,a);}
-  }
-  return out;
-}
-function addCells(cells,dx,dz){const sx=Math.round(dx/CELL),sz=Math.round(dz/CELL);
-  cells.forEach(k=>{const ix=Math.floor(k/8192)-4096,iz=(k%8192)-4096;solid.add(key(ix+sx,iz+sz));});}
-
-/* ---------- chargement d'une zone ---------- */
-const zones={};let stage=0;const STAGES=3;
-function setBar(f,t){$("fill").style.width=(f*100).toFixed(0)+"%";if(t)$("lt").textContent=t;}
-async function loadModel(k){
-  const M=MODELS[k],caps=engine._caps,old=caps.maxTextureSize;caps.maxTextureSize=M.tex;
-  let res;
-  try{res=await BABYLON.SceneLoader.ImportMeshAsync("",BASE,M.file,scene,e=>{
-    if(e.lengthComputable)setBar((stage+e.loaded/e.total*.8)/STAGES,"Téléchargement : "+M.label);});}
-  finally{caps.maxTextureSize=old;}
-  setBar((stage+.8)/STAGES,"Préparation : "+M.label);await new Promise(r=>setTimeout(r,30));
-  const root=res.meshes[0];root.scaling.scaleInPlace(M.scale);root.computeWorldMatrix(true);
-  const meshes=res.meshes.filter(m=>m.getTotalVertices()>0);meshes.forEach(m=>m.computeWorldMatrix(true));
-  let mn=new V3(1e9,1e9,1e9),mx=new V3(-1e9,-1e9,-1e9);
-  meshes.forEach(m=>{const b=m.getBoundingInfo().boundingBox;mn=V3.Minimize(mn,b.minimumWorld);mx=V3.Maximize(mx,b.maximumWorld);});
-  const cells=collect(meshes);
-  // verre : on coupe la transparence lourde (réfraction)
-  meshes.forEach(m=>{const mt=m.material;if(mt&&mt.subSurface){mt.subSurface.isRefractionEnabled=false;mt.subSurface.isTranslucencyEnabled=false;}});
-  // fusion par matériau
-  const groups=new Map();meshes.forEach(m=>{const g=groups.get(m.material)||[];g.push(m);groups.set(m.material,g);});
-  let final=[];
-  groups.forEach((g,mat)=>{try{const mm=BABYLON.Mesh.MergeMeshes(g,true,true,undefined,false,false);if(mm){mm.material=mat;final.push(mm);}else final.push(...g);}catch(e){final.push(...g);}});
-  root.dispose();
-  return {meshes:final,mn,mx,cells,w:mx.x-mn.x,d:mx.z-mn.z};
-}
-function place(z,list){ // list = centres [x,z] ; la 1re copie utilise l'original, les autres des instances
-  const cx=(z.mn.x+z.mx.x)/2,cz=(z.mn.z+z.mx.z)/2,ys=-z.mn.y;
-  list.forEach(([px,pz],i)=>{
-    const dx=Math.round((px-cx)/CELL)*CELL,dz=Math.round((pz-cz)/CELL)*CELL;
-    z.meshes.forEach(m=>{
-      const o=i==0?m:m.createInstance(m.name+"_"+i);
-      o.position.set(dx,ys,dz);o.isPickable=false;o.freezeWorldMatrix();
-      if(o!==m){o.alwaysSelectAsActiveMesh=false;}
-    });
-    addCells(z.cells,dx,dz);
-  });
-}
-const rects=[];
-const addRect=(name,x0,x1,z0,z1)=>rects.push({name,x0,x1,z0,z1});
-
-/* ---------- routes, trottoirs, passages piétons ---------- */
-function buildRoads(){
-  const R=rects,bx0=Math.min(...R.map(r=>r.x0))-10,bx1=Math.max(...R.map(r=>r.x1))+10,
-        bz0=Math.min(...R.map(r=>r.z0))-10,bz1=Math.max(...R.map(r=>r.z1))+10;
-  const tex=new BABYLON.DynamicTexture("asph",256,scene,true);const g=tex.getContext();
-  g.fillStyle="#3a3a3e";g.fillRect(0,0,256,256);
-  for(let i=0;i<2500;i++){const v=40+Math.random()*30|0;g.fillStyle=`rgb(${v},${v},${v+3})`;g.fillRect(Math.random()*256,Math.random()*256,2,2);}
-  tex.update();tex.wrapU=tex.wrapV=1;
-  const am=new BABYLON.StandardMaterial("am",scene);am.diffuseTexture=tex;am.specularColor=new BABYLON.Color3(0,0,0);
-  am.diffuseTexture.uScale=(bx1-bx0)/8;am.diffuseTexture.vScale=(bz1-bz0)/8;
-  const ground=BABYLON.MeshBuilder.CreateGround("asphalt",{width:bx1-bx0,height:bz1-bz0},scene);
-  ground.position.set((bx0+bx1)/2,-.02,(bz0+bz1)/2);ground.material=am;ground.freezeWorldMatrix();
-  const gm=new BABYLON.StandardMaterial("gm",scene);gm.diffuseColor=new BABYLON.Color3(.25,.45,.22);gm.specularColor=new BABYLON.Color3(0,0,0);
-  const grass=BABYLON.MeshBuilder.CreateGround("grass",{width:4000,height:4000},scene);grass.position.y=-.1;grass.material=gm;grass.freezeWorldMatrix();
-  const wm=new BABYLON.StandardMaterial("wm",scene);wm.diffuseColor=new BABYLON.Color3(.9,.9,.9);wm.emissiveColor=new BABYLON.Color3(.4,.4,.4);
-  const sm=new BABYLON.StandardMaterial("sm",scene);sm.diffuseColor=new BABYLON.Color3(.6,.6,.6);sm.specularColor=new BABYLON.Color3(0,0,0);
-  const dash=BABYLON.MeshBuilder.CreateBox("dash",{width:.25,height:.03,depth:3},scene);dash.material=wm;
-  const zebra=BABYLON.MeshBuilder.CreateBox("zebra",{width:.5,height:.03,depth:3.5},scene);zebra.material=wm;
-  const dM=[],zM=[];
-  const T=(sx,sy,sz,x,y,z)=>BABYLON.Matrix.Compose(new V3(sx,sy,sz),BABYLON.Quaternion.Identity(),new V3(x,y,z));
-  const zmid=(bz0+bz1)/2,zl=bz1-bz0;
-  const roadNS=(xa,xb)=>{ // route nord-sud entre xa et xb
-    const mid=(xa+xb)/2;
-    [[xa,xa+SIDEWALK],[xb-SIDEWALK,xb]].forEach(([a,b])=>{
-      const s=BABYLON.MeshBuilder.CreateBox("sw",{width:b-a,height:.18,depth:zl},scene);
-      s.position.set((a+b)/2,.07,zmid);s.material=sm;s.freezeWorldMatrix();});
-    for(let z=bz0+3;z<bz1;z+=7)dM.push(T(1,1,1,mid,.02,z));
-    for(const cz of [zmid-60,zmid,zmid+60])
-      for(let x=xa+SIDEWALK+.5;x<xb-SIDEWALK;x+=1.1)zM.push(T(1,1,1,x,.02,cz));
-  };
-  const c=R.find(r=>r.name=="center"),h=R.find(r=>r.name=="hood"),k=R.find(r=>r.name=="hk");
-  if(k)roadNS(k.x1,c.x0);if(h)roadNS(c.x1,h.x0);
-  dash.thinInstanceSetBuffer("matrix",new Float32Array(dM.flatMap(m=>m.toArray())),16,true);
-  zebra.thinInstanceSetBuffer("matrix",new Float32Array(zM.flatMap(m=>m.toArray())),16,true);
-  return {bx0,bx1,bz0,bz1,roadW:k?(k.x1+c.x0)/2:0,roadE:h?(c.x1+h.x0)/2:0};
-}
-
-/* ---------- joueur ---------- */
-const player=new BABYLON.TransformNode("player",scene);
-const bodyMat=c=>{const m=new BABYLON.StandardMaterial("pm",scene);m.diffuseColor=BABYLON.Color3.FromHexString(c);m.specularColor=new BABYLON.Color3(0,0,0);return m;};
-const mk=(w,h,d,x,y,z,c)=>{const b=BABYLON.MeshBuilder.CreateBox("p",{width:w,height:h,depth:d},scene);b.parent=player;b.position.set(x,y,z);b.material=bodyMat(c);b.isPickable=false;return b;};
-mk(.5,.7,.3,0,1.15,0,"#2563eb");mk(.32,.32,.32,0,1.7,0,"#f1c27d");
-const limbs=[mk(.18,.7,.2,-.14,.4,0,"#1f2937"),mk(.18,.7,.2,.14,.4,0,"#1f2937"),mk(.14,.6,.16,-.34,1.15,0,"#f1c27d"),mk(.14,.6,.16,.34,1.15,0,"#f1c27d")];
-limbs.forEach(l=>{l.setPivotPoint(new V3(0,l.scaling.y*.3+.3,0));});
-let vy=0,onGround=true,camYaw=0,camPitch=.35,jx=0,jy=0,sprint=false,jumpReq=false,walkT=0;
-function tryMove(x,z,nx,nz){const r=.4,free=(a,b)=>!(isSolid(a-r,b-r)||isSolid(a+r,b-r)||isSolid(a-r,b+r)||isSolid(a+r,b+r));
-  let px=x,pz=z;if(free(nx,pz))px=nx;if(free(px,nz))pz=nz;return [px,pz];}
-let B=null;
-function findFree(x,z){for(let r=0;r<60;r++)for(let i=-r;i<=r;i++)for(let j=-r;j<=r;j++){
-  if(Math.max(Math.abs(i),Math.abs(j))!=r)continue;const px=x+i*CELL,pz=z+j*CELL;
-  if(!isSolid(px-1,pz-1)&&!isSolid(px+1,pz-1)&&!isSolid(px-1,pz+1)&&!isSolid(px+1,pz+1))return [px,pz];}return [x,z];}
-function teleport(x,z){const [a,b]=findFree(x,z);player.position.set(a,0,b);vy=0;}
-
-/* ---------- commandes tactiles ---------- */
-const joy=$("joy"),knob=$("knob");let joyId=null,lookId=null,lx=0,ly=0;
-const inBtn=t=>t.closest&&t.closest(".btn,#bDbg,#dbg");
-document.addEventListener("pointerdown",e=>{if(inBtn(e.target))return;
-  const r=joy.getBoundingClientRect(),cx=r.left+65,cy=r.top+65;
-  if(joyId===null&&Math.hypot(e.clientX-cx,e.clientY-cy)<110){joyId=e.pointerId;moveJoy(e);}
-  else if(lookId===null){lookId=e.pointerId;lx=e.clientX;ly=e.clientY;}});
-document.addEventListener("pointermove",e=>{
-  if(e.pointerId===joyId)moveJoy(e);
-  else if(e.pointerId===lookId){camYaw+=(e.clientX-lx)*.006;camPitch=Math.min(1.2,Math.max(.05,camPitch+(e.clientY-ly)*.004));lx=e.clientX;ly=e.clientY;}});
-const up=e=>{if(e.pointerId===joyId){joyId=null;jx=jy=0;knob.style.left=knob.style.top="40px";}if(e.pointerId===lookId)lookId=null;};
-document.addEventListener("pointerup",up);document.addEventListener("pointercancel",up);
-function moveJoy(e){const r=joy.getBoundingClientRect();let dx=e.clientX-(r.left+65),dy=e.clientY-(r.top+65);
-  const d=Math.hypot(dx,dy),m=55;if(d>m){dx*=m/d;dy*=m/d;}jx=dx/m;jy=dy/m;knob.style.left=(40+dx)+"px";knob.style.top=(40+dy)+"px";}
-$("bJump").addEventListener("pointerdown",()=>jumpReq=true);
-$("bSprint").addEventListener("pointerdown",e=>{sprint=!sprint;e.target.style.background=sprint?"#4ade8088":"#ffffff33";});
-// clavier (test sur ordinateur)
-const keys={};addEventListener("keydown",e=>{keys[e.code]=1;if(e.code=="Space")jumpReq=true;});addEventListener("keyup",e=>keys[e.code]=0);
-
-/* ---------- boucle de jeu ---------- */
-function update(dt){
-  let ix=jx,iy=jy;if(keys.KeyA)ix-=1;if(keys.KeyD)ix+=1;if(keys.KeyW)iy-=1;if(keys.KeyS)iy+=1;
-  const mag=Math.min(1,Math.hypot(ix,iy));
-  if(mag>.1){const sp=(sprint||keys.ShiftLeft?7:3.8)*mag,s=Math.sin(camYaw),c=Math.cos(camYaw);
-    const mx=(ix*c-iy*s),mz=(-ix*s-iy*c),l=Math.hypot(mx,mz)||1;
-    const [px,pz]=tryMove(player.position.x,player.position.z,player.position.x+mx/l*sp*dt,player.position.z+mz/l*sp*dt);
-    player.position.x=px;player.position.z=pz;player.rotation.y=Math.atan2(mx,mz);walkT+=dt*sp*1.8;
-  }else walkT*=.8;
-  if(B){const p=player.position;p.x=Math.min(B.bx1-4,Math.max(B.bx0+4,p.x));p.z=Math.min(B.bz1-4,Math.max(B.bz0+4,p.z));}
-  if(jumpReq&&onGround){vy=6;onGround=false;}jumpReq=false;
-  vy-=18*dt;player.position.y+=vy*dt;if(player.position.y<=0){player.position.y=0;vy=0;onGround=true;}
-  const sw=Math.sin(walkT)*.7*Math.min(1,mag*1.5);limbs[0].rotation.x=sw;limbs[1].rotation.x=-sw;limbs[2].rotation.x=-sw;limbs[3].rotation.x=sw;
-  const D=6.5,cp=Math.cos(camPitch),h=player.position.add(new V3(0,1.5,0));
-  cam.position.set(h.x-Math.sin(camYaw)*cp*D,h.y+Math.sin(camPitch)*D,h.z-Math.cos(camYaw)*cp*D);cam.setTarget(h);
-}
-
-/* ---------- panneau debug ---------- */
-const dbg=$("dbg");
-dbg.innerHTML='<div id="st"></div><div id="tp"></div><div id="sc"></div>';
-$("bDbg").addEventListener("pointerdown",()=>dbg.style.display=dbg.style.display=="block"?"none":"block");
-function buildDbg(){
-  const tp=$("tp");tp.innerHTML="<b>Téléportation</b><br>";
-  [["Centre",zones.center],["Quartier",zones.hood],["Hong Kong",zones.hk]].forEach(([n,z])=>{if(!z)return;
-    const b=document.createElement("button");b.textContent=n;b.onclick=()=>teleport(z.cx,z.cz);tp.appendChild(b);});
-  const sc=$("sc");sc.innerHTML="<b>Échelle (recharge)</b><br>";
-  for(const k in MODELS){const l=document.createElement("div");l.innerHTML=MODELS[k].label+' <input id="s_'+k+'" value="'+MODELS[k].scale+'" inputmode="decimal">';sc.appendChild(l);}
-  const ap=document.createElement("button");ap.textContent="Appliquer";ap.onclick=()=>{const o={};for(const k in MODELS)o[k]=parseFloat($("s_"+k).value)||MODELS[k].scale;localStorage.setItem("scales",JSON.stringify(o));location.reload();};sc.appendChild(ap);
-}
-setInterval(()=>{if(dbg.style.display!="block")return;let mb=0;
-  scene.textures.forEach(t=>{const s=t.getSize&&t.getSize();if(s&&s.width)mb+=s.width*s.height*4*1.33/1048576;});
-  $("st").innerHTML="FPS : "+engine.getFps().toFixed(0)+"<br>Mémoire textures ≈ "+mb.toFixed(0)+" Mo<br>Triangles : "+(scene.getActiveIndices()/3|0)+"<br>Meshes : "+scene.meshes.length+" (actifs "+scene.getActiveMeshes().length+")<br>Cases collision : "+solid.size;},500);
-
-/* ---------- démarrage ---------- */
-addEventListener("error",e=>{$("lt").textContent="Erreur : "+(e.message||"inconnue");});
-addEventListener("unhandledrejection",e=>{$("lt").textContent="Erreur : "+((e.reason&&e.reason.message)||e.reason);});
-(async()=>{
-  try{
-    // 0) vérifie que les modèles sont bien présents
-    try{const r=await fetch(BASE+MODELS.center.file,{method:"HEAD"});if(!r.ok)throw new Error("HTTP "+r.status);}
-    catch(e){$("lt").textContent="Modèle introuvable ("+(e.message||e)+"). Vérifie que le dossier models/ est bien dans ton dépôt GitHub, à côté de index.html.";return;}
-    // 1) Centre-ville au milieu
-    let z=await loadModel("center");z.cx=0;z.cz=0;place(z,[[0,0]]);zones.center=z;
-    addRect("center",-z.w/2,z.w/2,-z.d/2,z.d/2);stage++;
-    // 2) Quartier résidentiel à l'est (copies en grille)
-    const M2=MODELS.hood;z=await loadModel("hood");
-    const gx=z.w+8,gz=z.d+8,totW=M2.cols*gx-8,totD=M2.rows*gz-8,x0=zones.center.w/2+GAP;
-    const l2=[];for(let i=0;i<M2.cols;i++)for(let j=0;j<M2.rows;j++)l2.push([x0+z.w/2+i*gx,(j-(M2.rows-1)/2)*gz]);
-    place(z,l2);z.cx=x0+totW/2;z.cz=0;zones.hood=z;addRect("hood",x0,x0+totW,-totD/2,totD/2);stage++;
-    // 3) Hong Kong à l'ouest (copies empilées vers le nord/sud)
-    const M3=MODELS.hk;z=await loadModel("hk");
-    const hx1=-(zones.center.w/2+GAP),l3=[],tz=M3.copies*z.d+(M3.copies-1)*GAP;
-    for(let j=0;j<M3.copies;j++)l3.push([hx1-z.w/2,-tz/2+z.d/2+j*(z.d+GAP)]);
-    place(z,l3);z.cx=hx1-z.w/2;z.cz=0;zones.hk=z;addRect("hk",hx1-z.w,hx1,-tz/2,tz/2);stage++;
-    // routes
-    setBar(1,"Construction des routes… ("+VERSION+")");await new Promise(r=>setTimeout(r,30));
-    B=buildRoads();buildDbg();teleport(B.roadE,0);camYaw=-Math.PI/2;
-    $("load").style.display="none";
-    let last=performance.now();
-    engine.runRenderLoop(()=>{const n=performance.now();update(Math.min(.05,(n-last)/1000));last=n;scene.render();});
-  }catch(err){$("lt").textContent="Erreur : "+(err.message||err);console.error(err);}
-})();
-addEventListener("resize",()=>engine.resize());
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x9fc4e8);scene.fog=new THREE.Fog(0x9fc4e8,400,1800);
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.5,4000);
+const r=new THREE.WebGLRenderer({antialias:true});r.setPixelRatio(Math.min(devicePixelRatio,2));r.setSize(innerWidth,innerHeight);
+r.outputEncoding=THREE.sRGBEncoding;document.body.prepend(r.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x667788,1.1));
+const sun=new THREE.DirectionalLight(0xfff2dd,1.4);sun.position.set(200,400,150);scene.add(sun);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x555a5e,roughness:1}));
+ground.rotation.x=-Math.PI/2;ground.position.y=-0.2;scene.add(ground);
+// Modèles : largeur cible (m) et position
+const items=[
+ {f:'traffic_slam_2_map.glb',n:'Carte',w:500,x:0,z:0},
+ {f:'city.glb',n:'Rue',w:120,x:360,z:0},
+ {f:'Untitled.glb',n:'Bâtiments',w:100,x:-340,z:0}];
+const ui=document.getElementById('ui'),msg=document.getElementById('msg');let left=items.length;
+const loader=new THREE.GLTFLoader();
+items.forEach(it=>{
+ const b=document.createElement('button');b.textContent=it.n;ui.appendChild(b);
+ b.onclick=()=>{if(!it.obj)return;it.obj.visible=!it.obj.visible;b.classList.toggle('off',!it.obj.visible)};
+ loader.load('models/'+it.f,g=>{
+  const o=g.scene;let bx=new THREE.Box3().setFromObject(o),s=bx.getSize(new THREE.Vector3());
+  o.scale.setScalar(it.w/Math.max(s.x,s.z));bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
+  o.position.set(it.x-c.x,-bx.min.y,it.z-c.z);scene.add(o);it.obj=o;
+  if(--left==0)msg.textContent='Glisse = tourner · 2 doigts = zoom/déplacer';
+ },e=>{if(e.total)msg.textContent='Chargement '+it.n+' '+Math.round(e.loaded/e.total*100)+'%'},
+ ()=>{msg.textContent='Erreur : '+it.f+' introuvable'});
+});
+// Contrôles tactiles
+let th=0.6,ph=1.0,dist=500;const tg=new THREE.Vector3(0,0,0);let pts=new Map(),last=0,lc=null;
+const el=r.domElement;
+el.onpointerdown=e=>{el.setPointerCapture(e.pointerId);pts.set(e.pointerId,[e.clientX,e.clientY]);last=0};
+el.onpointerup=el.onpointercancel=e=>{pts.delete(e.pointerId);last=0;lc=null};
+el.onpointermove=e=>{if(!pts.has(e.pointerId))return;const p=pts.get(e.pointerId);const dx=e.clientX-p[0],dy=e.clientY-p[1];pts.set(e.pointerId,[e.clientX,e.clientY]);
+ if(pts.size==1){th-=dx*0.006;ph=Math.min(1.5,Math.max(0.15,ph-dy*0.005))}
+ else if(pts.size==2){const a=[...pts.values()],d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);
+  if(last)dist=Math.min(1500,Math.max(10,dist*last/d));last=d;
+  const k=dist*0.0015,mx=(dx/2),my=(dy/2);tg.x-=(Math.cos(th)*mx+Math.sin(th)*my)*k;tg.z-=(-Math.sin(th)*mx+Math.cos(th)*my)*k}};
+el.onwheel=e=>{dist=Math.min(1500,Math.max(10,dist*(1+e.deltaY*0.001)))};
+onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
+(function loop(){requestAnimationFrame(loop);
+ cam.position.set(tg.x+dist*Math.sin(ph)*Math.sin(th),tg.y+dist*Math.cos(ph),tg.z+dist*Math.sin(ph)*Math.cos(th));cam.lookAt(tg);r.render(scene,cam)})();
 </script></body></html>
