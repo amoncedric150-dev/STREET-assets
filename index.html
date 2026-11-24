@@ -39,6 +39,10 @@ const loader=new THREE.GLTFLoader();let base=location.href.split('?')[0].split('
 // ===== Utilitaires de chargement (identiques à avant) =====
 function clean(root){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push(o)});k.forEach(o=>o.parent&&o.parent.remove(o));
  root.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&((m.transparent&&m.opacity<.15)||m.colorWrite===false))m.visible=false})})}
+// Arbres du fichier : un seul gros mesh de feuilles (matériaux « FoliageTrees… ») et un d'écorce (« CityGenBark… ») par tuile
+const TREE_MAT=/^(FoliageTrees|CityGenBark)/i;
+function hideTrees(o){let n=0;o.traverse(c=>{if(!c.isMesh||!c.visible)return;const ms=[].concat(c.material);
+ if(ms.length&&ms.every(m=>m&&TREE_MAT.test(m.name||''))){c.visible=false;n++}});return n}
 function lighten(o){const v=new THREE.Vector3();o.traverse(c=>{if(!c.isMesh||!c.geometry)return;
  const g=c.geometry,tri=(g.index?g.index.count:g.attributes.position.count)/3;
  if(tri>8000){g.computeBoundingBox();g.boundingBox.getSize(v);if(v.length()<10)c.visible=false}});
@@ -293,7 +297,7 @@ function start(o){
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;o.updateMatrixWorld(true);
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
- const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
+ const NT=hideTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  for(let i=0;i<TILES;i++)for(let j=0;j<TILES;j++){const tg=new THREE.Group();
   tg.position.set((i-cc)*sz.x,0,(j-cc)*sz.z);tg.scale.set(Math.abs(i-cc)%2?-1:1,1,Math.abs(j-cc)%2?-1:1);
@@ -304,7 +308,7 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);
  scene.add(wrap);buildMap();spawn();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra';
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT;
  setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
