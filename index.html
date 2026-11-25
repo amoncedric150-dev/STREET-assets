@@ -21,6 +21,14 @@ button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;pad
 <div id="joy"><div id="knob"></div></div>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="builder.js"></script>
+<script src="materials.js"></script>
+<script src="furniture.js"></script>
+<script src="layout_apartment.js"></script>
+<script src="models.js"></script>
+<script src="runtime.js"></script>
+<script>/* sécurité : si un fichier des intérieurs manque, la ville continue de fonctionner normalement */
+if(!(window.INTERIORS&&INTERIORS.api&&INTERIORS.api.attach)){console.warn("[INTERIORS] fichiers manquants : intérieurs désactivés");window.INTERIORS={api:{active:false,k:1,floorY:0,frame(){},attach(){},canStand(){return true},camHit(){return false}}}}</script>
 <script>
 // Images du ciel intégrées directement dans le code (aucun fichier à héberger)
 // SKY2 = lever de soleil (MorningSkyHDRI007B) · SKY3 = nuit étoilée (ancienne) · SKY4 = nuit étoilée (NightSkyHDRI013) · le ciel « crépuscule avec arbres » a été supprimé
@@ -590,12 +598,14 @@ function buildMap(){
 function cellAt(x,z){const i=Math.floor((x-MAP.x0)/MAP.cell),j=Math.floor((MAP.z0-z)/MAP.cell);return(i<0||j<0||i>=N||j>=N)?-1:j*N+i}
 function cellXZ(k){const i=k&(N-1),j=k>>SH;return[MAP.x0+(i+.5)*MAP.cell,MAP.z0-(j+.5)*MAP.cell]}
 const OFF=[[0,0],[.3,0],[-.3,0],[0,.3],[0,-.3]];
-function canStand(x,z){if(MAP.free)return true;
+function canStand(x,z){return INTERIORS.api.active?INTERIORS.api.canStand(x,z):canStandCity(x,z)}
+function canStandCity(x,z){if(MAP.free)return true;
  for(const o of OFF){const px=x+o[0],pz=z+o[1],k=cellAt(px,pz);
   if(k>=0){if(!MAP.walk[k])return false}
   else{if(Math.abs(px)>EXT||Math.abs(pz)>EXT)return false;if(houseAt(px,pz,0))return false}}
  return true}
-function groundAt(x,z){const k=cellAt(x,z);return k>=0?MAP.GH[k]:MAP.g}
+function groundAt(x,z){return INTERIORS.api.active?INTERIORS.api.floorY:groundAtCity(x,z)}
+function groundAtCity(x,z){const k=cellAt(x,z);return k>=0?MAP.GH[k]:MAP.g}
 function topAt(x,z){const k=cellAt(x,z);if(k>=0)return MAP.has[k]?MAP.H[k]:-1e9;const h=houseAt(x,z,0);return h?MAP.g+h.h:-1e9}
 
 // ===== Joueur + PNJ =====
@@ -685,7 +695,7 @@ function updateCam(dt,now){
  const hx=P.x,hy=P.y+1.6,hz=P.z;
  if((jx||jy)&&jy>-.3&&now-lastDrag>1.2)yaw=turnTo(yaw,P.face+Math.PI,1.3*dt); // se replace doucement derrière le personnage
  const cp=Math.cos(pitch),dx=Math.sin(yaw)*cp,dy=Math.sin(pitch),dz=Math.cos(yaw)*cp;
- let d=wantDist;for(let t=.6;t<=wantDist;t+=.4){if(topAt(hx+dx*t,hz+dz*t)>hy+dy*t-.25){d=Math.max(1.1,t-.5);break}}
+ let d=wantDist;for(let t=.6;t<=wantDist;t+=.4){if(INTERIORS.api.active?INTERIORS.api.camHit(hx+dx*t,hy+dy*t,hz+dz*t):topAt(hx+dx*t,hz+dz*t)>hy+dy*t-.25){d=Math.max(1.1,t-.5);break}}
  camDist+=(d-camDist)*Math.min(1,(d<camDist?14:3)*dt);
  cam.position.set(hx+dx*camDist,hy+dy*camDist,hz+dz*camDist);
  const gy=groundAt(cam.position.x,cam.position.z)+.3;if(cam.position.y<gy)cam.position.y=gy;
@@ -817,6 +827,10 @@ function start(o){
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
 
+// ===== Système d'intérieurs (appartements) : branché sur le joueur P, la caméra et le chargeur GLB existants =====
+INTERIORS.api.attach({THREE,scene,cam,renderer:r,P,ground,npcGroup,FX,loader,msg,applyShadows,groundAtCity,canStandCity,
+ get base(){return base},getWrap:()=>wrap,
+ getView:()=>({yaw,pitch,dist:wantDist}),setView:(y,p,d)=>{yaw=y;pitch=p;wantDist=d;camDist=d}});
 // ===== Boucle =====
 onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
 let tPrev=performance.now()/1000;
@@ -825,14 +839,15 @@ let tPrev=performance.now()/1000;
   const m=Math.min(1,Math.hypot(jx,jy));
   if(m>0){const fx=-Math.sin(yaw),fz=-Math.cos(yaw),rx=Math.cos(yaw),rz=-Math.sin(yaw);
    let mx=fx*jy+rx*jx,mz=fz*jy+rz*jx;const l=Math.hypot(mx,mz)||1;mx/=l;mz/=l;
-   const v=m>.9?6:(1.5+m*2.5);P.spd=v;
+   const v=(m>.9?6:(1.5+m*2.5))*INTERIORS.api.k;P.spd=v;
    const sx=mx*v*dt,sz=mz*v*dt;if(canStand(P.x+sx,P.z))P.x+=sx;if(canStand(P.x,P.z+sz))P.z+=sz;
    P.face=turnTo(P.face,Math.atan2(mx,mz),10*dt)}else P.spd=0;
   P.y+=(groundAt(P.x,P.z)-P.y)*Math.min(1,12*dt);
   P.m.position.set(P.x,P.y,P.z);P.m.rotation.y=P.face;animate(P.m,dt,P.spd);
-  npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now);
+  if(!INTERIORS.api.active)npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now);INTERIORS.api.frame(dt,now);
   }
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
  todStep(dt,now);
+ {const ia=INTERIORS.api.active;sun.visible=!ia;hemi.visible=!ia}
  try{r.render(scene,cam)}catch(e){if(!restoreTrees(e)){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
 </script></body></html>
