@@ -56,11 +56,11 @@ const DEG=Math.PI/180,KD=40,NK=6,CYC=KD*NK; // 6 étapes de 40 s = cycle complet
 // hs/hg/hi = lumière d'ambiance · fog = couleur de brume · env = luminosité de l'éclairage du ciel · lamp/win = lampadaires / fenêtres allumés (0 à 1) · h = heure affichée
 const K=[
  {n:'Jour',      sky:0,off:0,  az:-1.2, el:25.1,sc:0xfff0d8,si:2.1, hs:0xcfe4ff,hg:0x8a8f94,hi:.25,fog:0xb9c6cb,env:1.0,lamp:0,  win:0,  h:12},
- {n:'Coucher',   sky:1,off:0,  az:0,    el:4,   sc:0xff9a52,si:1.9, hs:0xffb27a,hg:0x3a3040,hi:.22,fog:0x968c8c,env:1.3,lamp:.35,win:.25,h:19.5},
- {n:'Crépuscule',sky:2,off:0,  az:-58.5,el:22,  sc:0xb7c6e8,si:.55, hs:0x7f98c8,hg:0x2a2e3a,hi:.30,fog:0x708698,env:1.6,lamp:.9, win:.8, h:21},
- {n:'Nuit',      sky:3,off:0,  az:40,   el:48,  sc:0x8fa8e8,si:.5,  hs:0x2a3a66,hg:0x14161c,hi:.30,fog:0x1d2530,env:2.2,lamp:1,  win:1,  h:24},
- {n:'Aube',      sky:2,off:.5, az:121.5,el:22,  sc:0xa9b8e0,si:.45, hs:0x7f98c8,hg:0x2a2e3a,hi:.30,fog:0x62788a,env:1.6,lamp:.55,win:.45,h:28.5},
- {n:'Lever',     sky:1,off:.5, az:-180, el:4,   sc:0xff9a52,si:1.8, hs:0xffb27a,hg:0x3a3040,hi:.22,fog:0x968c8c,env:1.3,lamp:.08,win:.05,h:30}];
+ {n:'Coucher',   sky:1,off:0,  az:0,    el:4,   sc:0xff9a52,si:1.55,hs:0xffb27a,hg:0x3a3040,hi:.17,fog:0x8a8082,env:.8, lamp:.3, win:.25,h:19.5},
+ {n:'Crépuscule',sky:2,off:0,  az:-58.5,el:22,  sc:0xb7c6e8,si:.2,  hs:0x6a80b0,hg:0x1c2029,hi:.12,fog:0x465668,env:.5, lamp:.85,win:.8, h:21},
+ {n:'Nuit',      sky:3,off:0,  az:40,   el:48,  sc:0x8fa8e8,si:.07, hs:0x1c2748,hg:0x0a0c10,hi:.04,fog:0x0e141c,env:.2, lamp:1,  win:1,  h:24},
+ {n:'Aube',      sky:2,off:.5, az:121.5,el:22,  sc:0xa9b8e0,si:.18, hs:0x6a80b0,hg:0x1c2029,hi:.11,fog:0x3f5062,env:.45,lamp:.8, win:.5, h:28.5},
+ {n:'Lever',     sky:1,off:.5, az:-180, el:4,   sc:0xff9a52,si:1.45,hs:0xffb27a,hg:0x3a3040,hi:.17,fog:0x8a8082,env:.75,lamp:.1, win:.05,h:30}];
 K.forEach(o=>{const a=o.az*DEG,e=o.el*DEG;o.d=new THREE.Vector3(Math.cos(e)*Math.cos(a),Math.sin(e),Math.cos(e)*Math.sin(a))});
 // ---- Trajectoire CONTINUE du soleil et de la lune : l'azimut avance sans cesse (jamais de saut entre deux phases) ; les images de ciel sont tournées pour que le disque visible suive toujours la vraie lumière ----
 const IMGAZ=[-1.2,0,-58.5,40]; // azimut du soleil / de la lune DANS chacune des 4 images de ciel
@@ -72,7 +72,9 @@ const azMoon=h=>-81.2+180*(Math.min(30.08,Math.max(19.42,h))-19.42)/10.66;   // 
 const elMoon=h=>49*Math.cos(Math.PI*(Math.min(30.08,Math.max(19.42,h))-24.75)/10.66);
 const cr=(a,b,c,d,x)=>.5*(2*b+(c-a)*x+(2*a-5*b+4*c-d)*x*x+(3*b-a-3*c+d)*x*x*x); // Catmull-Rom : la vitesse reste continue d'une phase à l'autre (plus de « stop-and-go »)
 const c01=x=>x<0?0:x>1?1:x;
-const TOD={t:0,paused:false,lamp:0,lastEnv:0,envKey:'',label:'Jour',goal:null};
+const TOD={t:0,paused:false,lamp:0,lastEnv:0,envKey:'',label:'Jour',goal:null,dt:.016};
+const IS_MOBILE=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent||'')||(window.matchMedia&&matchMedia('(pointer:coarse)').matches);
+const ENV_GAP=IS_MOBILE?.9:.4; // délai minimal (s) entre deux recalculs du PMREM : c'est la partie la plus coûteuse du cycle
 const WIN={value:0};
 let SKYREADY=false,SKY_TEX=null,ENVIMG=null,ENVCV=null,ENVTEX=null,ENVRT=null,ENVSM=null,PM=null;
 const skyMat=new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,fog:false,
@@ -110,14 +112,20 @@ function applyTOD(now){
   if(SKYREADY){const u=skyMat.uniforms;u.tA.value=SKY_TEX[A.sky];u.tB.value=SKY_TEX[B.sky];u.oA.value=oA;u.oB.value=oB;u.mixF.value=fs}
   // lumière principale (soleil ou lune) : trajectoire continue ; quand on passe du soleil à la lune elle s'éteint d'abord complètement (aucun saut d'ombre visible)
   const hand=A.m!==B.m,moon=hand?(s<.5?A.m:B.m):A.m,dip=hand?smt(0,1,Math.abs(2*s-1)):1;
-  const az=(moon?azMoon(h):azSun(h))*DEG,el=Math.max(5,moon?elMoon(h):elSun(h))*DEG;
+  const az=(moon?azMoon(h):azSun(h))*DEG,el=Math.max(7,moon?elMoon(h):elSun(h))*DEG; // plancher 7° : évite les ombres rasantes instables
   SUNDIR.set(Math.cos(el)*Math.cos(az),Math.sin(el),Math.cos(el)*Math.sin(az));
-  col('sc',sun.color);sun.intensity=Math.max(0,L('si'))*dip;sun.shadow.normalBias=.3+.5*Math.max(0,1-el/(25*DEG));
+  // le soleil perd de sa force en approchant de l'horizon (atmosphère) → coucher doux au lieu d'un soleil « plein pot »
+  const hz=moon?1:.3+.7*smt(7*DEG,24*DEG,el);
+  col('sc',sun.color);sun.intensity=Math.max(0,L('si'))*dip*hz;
+  // biais d'ombre adapté à l'angle : plus le soleil est bas, plus la profondeur varie vite d'un texel à l'autre (sinon : acné + scintillement)
+  sun.shadow.bias=-Math.min(.0018,.0002+.7*(180/2048)/Math.tan(el)/699);sun.shadow.normalBias=.3+.7*Math.max(0,1-el/(30*DEG));
   col('hs',hemi.color);col('hg',hemi.groundColor);hemi.intensity=Math.max(0,L('hi'));
   col('fog',scene.fog.color);scene.background.copy(scene.fog.color);
   TOD.lamp=c01(L('lamp'));WIN.value=c01(L('win'));TOD.label=(s<.5?A:B).n;
-  if(SKYREADY){const envI=Math.max(0,L('env')),key=A.sky+'|'+B.sky+'|'+Math.round(fs*300)+'|'+Math.round(oA*400)+'|'+Math.round(oB*400)+'|'+Math.round(envI*150);
-   if(key!==TOD.envKey&&now-TOD.lastEnv>.1){TOD.envKey=key;TOD.lastEnv=now;redrawEnv(A,B,fs,envI,oA,oB)}}}
+  if(SKYREADY){const envI=Math.max(0,L('env')),key=A.sky+'|'+B.sky+'|'+Math.round(fs*40)+'|'+Math.round(oA*72)+'|'+Math.round(oB*72)+'|'+Math.round(envI*40);
+   // clé grossière (pas de 5° de rotation, 2,5 % de fondu) + délai minimal doublé si le jeu rame → plus de PMREM en continu
+   const gap=ENV_GAP*(TOD.dt>.034?2:1);
+   if(key!==TOD.envKey&&(now-TOD.lastEnv>gap||!ENVRT)){TOD.envKey=key;TOD.lastEnv=now;redrawEnv(A,B,fs,envI,oA,oB)}}}
 
 // ===== Fenêtres allumées la nuit =====
 // 1) Chaque texture de façade est analysée une fois : les vitres (zones sombres rectangulaires) sont repérées une par une et reçoivent un identifiant → « carte des fenêtres ».
@@ -188,12 +196,16 @@ function patchWindows(m,full){
  const mode=full?3:1;if(m.userData.win===mode)return;m.userData.win=mode;
  const U=m.userData.winU||(m.userData.winU={uWinTex:{value:NEUTRAL},uMode:{value:0}});
  if(full)U.uMode.value=3;else queueMask(m); // texture : la carte est calculée en tâche de fond puis le shader s'active
- m.onBeforeCompile=sh=>{sh.uniforms.uWin=WIN;sh.uniforms.uTime=WINT;sh.uniforms.uGain=WINK.uGain;sh.uniforms.uMax=WINK.uMax;sh.uniforms.uWinTex=U.uWinTex;sh.uniforms.uMode=U.uMode;
+ m.userData.winBC=sh=>{sh.uniforms.uWin=WIN;sh.uniforms.uTime=WINT;sh.uniforms.uGain=WINK.uGain;sh.uniforms.uMax=WINK.uMax;sh.uniforms.uWinTex=U.uWinTex;sh.uniforms.uMode=U.uMode;
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWP;varying vec3 vWN;varying vec3 vOrg;')
    .replace('#include <begin_vertex>','#include <begin_vertex>\nvWP=(modelMatrix*vec4(transformed,1.0)).xyz;vWN=normalize(mat3(modelMatrix)*normal);vOrg=modelMatrix[3].xyz;');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\n'+WINFUNCS)
    .replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n'+WINGLSL)};
- m.customProgramCacheKey=()=>'win5'+(m.map?'m':'g');m.needsUpdate=true}
+ composeBC(m)}
+// un seul onBeforeCompile par matériau : fenêtres (winBC) + lumière des lampadaires (lampOn), dans cet ordre
+function composeBC(m){const w=m.userData.winBC,l=m.userData.lampOn;
+ m.onBeforeCompile=sh=>{if(w)w(sh);if(l)lampBC(sh)};
+ m.customProgramCacheKey=()=>(w?'win5'+(m.map?'m':'g'):'')+(l?'|lamp2':'');m.needsUpdate=true}
 // --- carte des fenêtres d'une texture (calculée une seule fois par image, une texture par « tick » pour ne pas figer le téléphone)
 const NEUTRAL=new THREE.DataTexture(new Uint8Array([128,128,128,0]),1,1,THREE.RGBAFormat);NEUTRAL.needsUpdate=true;
 const MASKS=new Map(),MQ=[];let mBusy=false,NWMAP=0;
@@ -224,14 +236,39 @@ function autoWindows0(){let n=0;const seen=new Set(),bb=new THREE.Box3(),v=new T
    [].concat(c.material).forEach(m=>{if(std(m)&&m.map&&!seen.has(m)){seen.add(m);patchWindows(m,false);n++}})})}
  return n}
 
-// ===== Lampadaires : halos lumineux, taches de lumière au sol + 4 vraies lumières sur les plus proches du joueur =====
+// ===== Lampadaires : halos lumineux + taches au sol + « carte de lumière » cuite (AUCUNE lumière dynamique : tout reste à la position réelle de chaque lampadaire) =====
 const GLOW=(()=>{const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d'),gr=g.createRadialGradient(32,32,0,32,32,32);
  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.18,'rgba(255,255,255,.55)');gr.addColorStop(.5,'rgba(255,255,255,.14)');gr.addColorStop(1,'rgba(255,255,255,0)');
  g.fillStyle=gr;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c)})();
 const FX=new THREE.Group();scene.add(FX);
 const LAMPS=[],LAMPRE=/lamp|lantern|luminair|street_?light|light_?pole|lampadaire|bulb/i;
 let haloMat=null,poolMat=null,lampCol=null,poolIm=null,LAMPB=new Float32Array(0),LAMPTH=LAMPB,LAMPPH=LAMPB,_lampAny=false;
-const PL=[0,1,2,3].map(()=>{const l=new THREE.PointLight(0xffc27a,0,26,1.6);l._have=null;l._want=null;scene.add(l);return l}); // 4 vraies lumières qui suivent le joueur (changement de lampe en fondu)
+// Carte de lumière : vue du dessus de toute la ville (1 texture). Chaque lampadaire allumé y dessine sa tache ; les matériaux de la ville la lisent (sol, routes, façades, voitures)
+// → tous les lampadaires éclairent leur environnement en même temps, pour le prix d'UNE lecture de texture (pas de PointLight, rien ne suit le joueur).
+const LAMP_R=11,LAMPLM=IS_MOBILE?512:768; // rayon d'éclairage (m) · résolution de la carte
+const LAMPSPR=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const g=c.getContext('2d'),gr=g.createRadialGradient(64,64,0,64,64,64);
+ gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.3,'rgba(255,255,255,.7)');gr.addColorStop(.62,'rgba(255,255,255,.26)');gr.addColorStop(.85,'rgba(255,255,255,.05)');gr.addColorStop(1,'rgba(255,255,255,0)');
+ g.fillStyle=gr;g.fillRect(0,0,128,128);return c})();
+let LAMPCV=null,LAMPTEX=null,LAMPQ=new Uint8Array(0),_lampDirty=false,_lastBake=0;
+const LAMPU={uLampMap:{value:null},uLampP:{value:new THREE.Vector4(0,0,1,0)},uLampCol:{value:new THREE.Vector3(1.0,.6,.27)},uLampOn:{value:0}};
+const LAMPGLSL='if(uLampOn>0.002){vec2 lq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
+ 'float ll=texture2D(uLampMap,clamp(lq,0.0,1.0)).r*step(0.0,min(lq.x,lq.y))*step(max(lq.x,lq.y),1.0);'+
+ 'float hh=1.0-smoothstep(1.5,9.0,vLP.y-uLampP.w);'+                       // la lumière retombe avec la hauteur (toits non éclairés)
+ 'float up=0.5+0.5*normalize(vLN).y;'+                                     // sol = plein, murs = moitié, dessous = rien
+ 'totalEmissiveRadiance+=diffuseColor.rgb*uLampCol*(ll*hh*up*uLampOn);}';
+function lampBC(sh){Object.assign(sh.uniforms,LAMPU);
+ sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vLP;varying vec3 vLN;')
+  .replace('#include <begin_vertex>','#include <begin_vertex>\nvec4 lw0=vec4(transformed,1.0);\n#ifdef USE_INSTANCING\nlw0=instanceMatrix*lw0;\n#endif\nvLP=(modelMatrix*lw0).xyz;vLN=normalize(mat3(modelMatrix)*normal);');
+ sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nuniform sampler2D uLampMap;uniform vec4 uLampP;uniform vec3 uLampCol;uniform float uLampOn;varying vec3 vLP;varying vec3 vLN;')
+  .replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n'+LAMPGLSL)}
+function patchLampLight(){const seen=new Set();let n=0;
+ scene.traverse(o=>{if(!o.isMesh||o===skyDome||o.parent===FX)return;
+  [].concat(o.material).forEach(m=>{if(!m||!m.isMeshStandardMaterial||seen.has(m))return;seen.add(m);if(m.userData.lampOn)return;m.userData.lampOn=true;composeBC(m);n++})});return n}
+function bakeLampMap(){if(!LAMPCV||!MAP)return;
+ const g=LAMPCV.getContext('2d'),W=LAMPLM,k=W/(MAP.cell*N),sp=2*LAMP_R*k;
+ g.globalCompositeOperation='source-over';g.globalAlpha=1;g.fillStyle='#000';g.fillRect(0,0,W,W);g.globalCompositeOperation='lighter';
+ for(let i=0;i<LAMPS.length;i++){const q=LAMPQ[i];if(!q)continue;const p=LAMPS[i];g.globalAlpha=q/16;g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-sp/2,(MAP.z0-p.z)*k-sp/2,sp,sp)}
+ g.globalAlpha=1;LAMPTEX.needsUpdate=true}
 function isLampMesh(c){if(LAMPNAMES.has(c.name)||LAMPRE.test(c.name||''))return true;
  for(const m of [].concat(c.material))if(m&&m.name&&LAMPRE.test(m.name))return true;
  for(let p=c.parent,i=0;p&&p!==wrap&&i<4;p=p.parent,i++)if(p.name&&LAMPRE.test(p.name))return true;return false}
@@ -250,56 +287,52 @@ function buildLights0(){
   let list=findLamps(),how='noms';if(list.length<3){list=findLampsH();how='carte'}
   LAMPS.length=0;list.forEach(p=>LAMPS.push(p));haloMat=poolMat=lampCol=poolIm=null;
   const n=LAMPS.length;LAMPB=new Float32Array(n);LAMPTH=new Float32Array(n);LAMPPH=new Float32Array(n);_lampAny=false;
-  PL.forEach(l=>{l._have=l._want=null;l.intensity=0});if(!n)return how;
+  LAMPQ=new Uint8Array(n);if(!n)return how;
+  if(!LAMPCV){LAMPCV=document.createElement('canvas');LAMPCV.width=LAMPCV.height=LAMPLM;LAMPTEX=new THREE.CanvasTexture(LAMPCV);LAMPTEX.flipY=false;LAMPTEX.generateMipmaps=false;LAMPTEX.minFilter=LAMPTEX.magFilter=THREE.LinearFilter;LAMPU.uLampMap.value=LAMPTEX}
+  LAMPU.uLampP.value.set(MAP.x0,MAP.z0,1/(MAP.cell*N),MAP.g);_lampDirty=true;
   const pos=new Float32Array(n*3);
   LAMPS.forEach((p,i)=>{pos[i*3]=p.x;pos[i*3+1]=p.y-.3;pos[i*3+2]=p.z;
    // chaque lampadaire a son propre seuil d'allumage : un peu de hasard + une « vague » qui parcourt la ville → ils ne s'allument jamais tous ensemble
    let h=Math.imul(Math.round(p.x*10)^0x9e3779b1,0x85ebca6b)^Math.imul(Math.round(p.z*10)^0x51ed270b,0xc2b2ae35);h^=h>>>13;h=Math.imul(h,0x27d4eb2f);h^=h>>>15;h>>>=0;
    const r1=(h&0xffff)/65535,r2=(h>>>16)/65535,sw=.5+.5*Math.sin(p.x*.013+1.3)*Math.cos(p.z*.011);
-   LAMPTH[i]=.04+.84*(.7*r1+.3*sw);LAMPPH[i]=r2*6.2832});
+   LAMPTH[i]=.06+.58*sw+.14*r1;LAMPPH[i]=r2*6.2832}); // seuil FIXE : vague spatiale douce qui suit le cycle jour/nuit, aucun hasard dans le temps
   const posA=new THREE.BufferAttribute(pos,3);lampCol=new THREE.BufferAttribute(new Float32Array(n*3),3);lampCol.setUsage(THREE.DynamicDrawUsage);
   const mk=(size,op)=>{const g=new THREE.BufferGeometry();g.setAttribute('position',posA);g.setAttribute('color',lampCol);
    const m=new THREE.PointsMaterial({map:GLOW,color:0xffb866,vertexColors:true,size,sizeAttenuation:true,transparent:true,opacity:op,blending:THREE.AdditiveBlending,depthWrite:false});
    const pts=new THREE.Points(g,m);pts.frustumCulled=false;FX.add(pts);return m};
   mk(10,.2);haloMat=mk(3.2,.6); // voile diffus + cœur lumineux
-  poolMat=new THREE.MeshBasicMaterial({map:GLOW,color:0xffb866,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+  poolMat=new THREE.MeshBasicMaterial({map:GLOW,color:0xffb866,transparent:true,opacity:.16,blending:THREE.AdditiveBlending,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
   poolIm=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),poolMat,n);const m4=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(13,1,13),pp=new THREE.Vector3();
   LAMPS.forEach((p,i)=>{m4.compose(pp.set(p.x,groundAt(p.x,p.z)+.12,p.z),q,sc);poolIm.setMatrixAt(i,m4)});
   poolIm.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(n*3),3);poolIm.instanceColor.setUsage(THREE.DynamicDrawUsage);
   poolIm.frustumCulled=false;FX.add(poolIm);
+  patchLampLight();
   return how}
-// allume chaque lampadaire séparément selon le niveau « nuit » (TOD.lamp) ; petit scintillement pendant l'allumage
+// allume chaque lampadaire selon le niveau « nuit » du cycle (TOD.lamp) : seuil fixe par lampadaire, montée douce, AUCUN scintillement aléatoire
 function updateLampFX(now,Lv){
   const n=LAMPS.length;if(!n||!lampCol||!poolIm)return false;
-  const ca=lampCol.array,pa=poolIm.instanceColor.array;let any=false;
-  for(let i=0;i<n;i++){const th=LAMPTH[i];let b=smt(th,th+.07,Lv);
-   if(b>0&&b<1)b*=1-(1-b)*.55*(.5+.5*Math.sin(now*37+LAMPPH[i]*11)*Math.sin(now*11.3+LAMPPH[i]*7));
-   LAMPB[i]=b;if(b>.004)any=true;ca[i*3]=ca[i*3+1]=ca[i*3+2]=b;pa[i*3]=pa[i*3+1]=pa[i*3+2]=b}
-  if(any||_lampAny){lampCol.needsUpdate=true;poolIm.instanceColor.needsUpdate=true}
-  _lampAny=any;return any}
-// choisit les 4 lampes ALLUMÉES les plus proches ; une lampe déjà choisie est conservée tant qu'elle reste dans les 4 (pas de lumière qui saute)
-function nearLamps(){const cand=[];
-  for(let i=0;i<LAMPS.length;i++){if(LAMPB[i]<.05)continue;const p=LAMPS[i],dx=p.x-P.x,dz=p.z-P.z;cand.push({i,d:dx*dx+dz*dz})}
-  cand.sort((a,b)=>a.d-b.d);const best=cand.slice(0,PL.length).map(c=>c.i),keep=new Set();
-  PL.forEach(l=>{if(l._want!==null&&best.includes(l._want))keep.add(l._want);else l._want=null});
-  const rest=best.filter(i=>!keep.has(i));PL.forEach(l=>{if(l._want===null&&rest.length)l._want=rest.shift()})}
+  const ca=lampCol.array,pa=poolIm.instanceColor.array;let any=false,ch=false;
+  for(let i=0;i<n;i++){const th=LAMPTH[i],b=smt(th,th+.12,Lv),q=Math.round(b*16);
+   if(q!==LAMPQ[i]){LAMPQ[i]=q;_lampDirty=true}
+   if(Math.abs(b-LAMPB[i])>.002){LAMPB[i]=b;ch=true;ca[i*3]=ca[i*3+1]=ca[i*3+2]=b;pa[i*3]=pa[i*3+1]=pa[i*3+2]=b}
+   if(b>.004)any=true}
+  if(ch){lampCol.needsUpdate=true;poolIm.instanceColor.needsUpdate=true}
+  return any}
 // ombre du soleil / de la lune : la caméra d'ombre suit le joueur, calée sur la grille de texels DANS L'ESPACE DE LA LUMIÈRE (pas de scintillement pendant que le soleil tourne)
 function placeSun(){
   const z=SUNDIR,xl=Math.hypot(z.z,z.x)||1,xx=z.z/xl,xz=-z.x/xl,yx=z.y*xz,yy=z.z*xx-z.x*xz,yz=-z.y*xx,q=2*180/2048;
   const a=P.x*xx+P.z*xz,b=P.x*yx+P.y*yy+P.z*yz,da=a-Math.round(a/q)*q,db=b-Math.round(b/q)*q;
   sun.target.position.set(P.x-da*xx-db*yx,P.y-db*yy,P.z-da*xz-db*yz);sun.target.updateMatrixWorld();
   sun.position.copy(sun.target.position).addScaledVector(SUNDIR,300)}
-let _lt=0,_ck=0;
+let _ck=0;
 function todStep(dt,now){
   // « Phase ▶ » : on accélère jusqu'à la phase suivante (au lieu de sauter d'un coup)
   if(TOD.goal!=null){const d=(TOD.goal-TOD.t+CYC)%CYC,st=dt*12;if(st>=d){TOD.t=TOD.goal;TOD.goal=null}else TOD.t=(TOD.t+st)%CYC}
   else if(!TOD.paused)TOD.t=(TOD.t+dt)%CYC;
   applyTOD(now);WINT.value=now%628.318;skyDome.position.copy(cam.position);if(MAP)placeSun();
-  const any=updateLampFX(now,TOD.lamp);FX.visible=any;
-  if(now-_lt>.3){_lt=now;if(MAP&&any)nearLamps()}
-  PL.forEach(l=>{
-   if(l._want!==l._have){l.intensity+=(0-l.intensity)*Math.min(1,dt*10);if(l.intensity<.1){l.intensity=0;l._have=l._want;if(l._have!==null){const p=LAMPS[l._have];l.position.set(p.x,p.y-.6,p.z)}}}
-   else l.intensity+=((l._have!==null?LAMPB[l._have]*6:0)-l.intensity)*Math.min(1,dt*5)});
+  TOD.dt=dt;const any=updateLampFX(now,TOD.lamp);FX.visible=any;LAMPU.uLampOn.value=any?1:0;
+  // la carte de lumière n'est redessinée que si un lampadaire a vraiment changé de niveau, et pas plus de ~3 fois/s
+  if(_lampDirty&&now-_lastBake>(IS_MOBILE?.35:.2)){_lastBake=now;_lampDirty=false;bakeLampMap()}
   if(now-_ck>.25){_ck=now;const h=hourOf(TOD.t)%24;document.getElementById('clk').textContent=pad2(Math.floor(h))+':'+pad2(Math.floor((h%1)*60))+' · '+TOD.label}}
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x4a4e52,roughness:1}));
 ground.rotation.x=-Math.PI/2;scene.add(ground);
@@ -539,7 +572,7 @@ function select(m){sel=m;const b=new THREE.Box3().setFromObject(m),v=b.getSize(n
  const col=[].concat(m.material).map(x=>x&&x.color?'#'+x.color.getHexString():'?').join(',');
  const tri=Math.round((m.geometry.index?m.geometry.index.count:m.geometry.attributes.position.count)/3);
  ii.textContent='Objet : '+(m.name||'(sans nom)')+'\nGroupes : '+(anc.join(' ‹ ')||'—')+'\nMatériau : '+matNames(m)+' '+col+'\nTaille : '+v.x.toFixed(1)+' × '+v.y.toFixed(1)+' × '+v.z.toFixed(1)+' m · '+tri+' triangles'}
-function rebuild(){clearTimeout(rbT);rbT=setTimeout(()=>{if(wrap&&MAP)buildMap()},60)}
+function rebuild(){clearTimeout(rbT);rbT=setTimeout(()=>{if(wrap&&MAP){buildMap();patchLampLight()}},60)}
 function applyHide(list,desc){const arr=list.filter(n=>n.visible);if(!arr.length){ii.textContent='Rien à masquer.';return}
  arr.forEach(n=>n.visible=false);hid.push(arr);hidLog.push(desc);sel=null;if(selBox)selBox.visible=false;ii.textContent='Masqué : '+arr.length+' objet(s). Annuler pour revenir.';rebuild()}
 $('ih').onclick=()=>{if(!sel)return;const root=tileRoot(sel),path=root?pathIn(root,sel):null,out=[];
