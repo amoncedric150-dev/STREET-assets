@@ -24,6 +24,12 @@
     envIntensity: 0.30,      // reflets du ciel sur les matériaux d'intérieur
     doorOpenAngle: 1.75, doorSpeed: 5.0, doorOpenDist: 1.5, doorCloseDist: 2.3,
     modelsPath: 'Models/interiors/',                // dossier des GLB de meubles (à côté de index.html)
+    seeCity: true,           // true = la ville reste visible par les fenêtres (l'appartement flotte au bord de la ville)
+    floorHeight: 12,         // hauteur du sol de l'appartement au-dessus de la rue (m), si seeCity
+    edgeGap: 50,             // distance entre le bord de la ville et l'appartement (m), si seeCity
+    playerScale: 0.8,        // taille du personnage à l'intérieur (1 = taille normale)
+    fov: 75,                 // champ de vision de la caméra à l'intérieur (la ville reste à 62)
+    sunIndoor: 0.35, hemiIndoor: 0.6,   // part de la lumière du jour qui entre dans l'appartement
     debugButton: true,       // petit bouton « 🏠 Appart. » dans la barre du haut
     autoEnterHash: 'appart'  // ouvrir le jeu avec  index.html#appart  => entre direct dans l'appartement
   };

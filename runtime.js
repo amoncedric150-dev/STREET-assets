@@ -15,7 +15,7 @@
   var api = NS.api = { active: false, k: 1, floorY: 0, cols: [] };
 
   var X = null, THREE = null, cur = null, busy = false, autoDone = false;
-  var built = {}, matsByStyle = {}, glbCache = {}, cityDoors = [], slots = [], ambient = null, ui = {}, lastZone = -2, titleT = 0, prevView = null;
+  var prevScale = 1, prevFov = 62, built = {}, matsByStyle = {}, glbCache = {}, cityDoors = [], slots = [], ambient = null, ui = {}, lastZone = -2, titleT = 0, prevView = null;
   var SLOTS = 4;
 
   function el(tag, css, txt) { var e = document.createElement(tag); e.style.cssText = css; if (txt) e.textContent = txt; return e; }
@@ -67,7 +67,35 @@
     d.mesh = makeMarker(); d.mesh.position.set(d.x, X.groundAtCity(d.x, d.z), d.z); d.mesh.rotation.y = d.face;
     X.scene.add(d.mesh); cityDoors.push(d); return d;
   };
-  function autoPlaceDoor() {
+  function autoPlaceDoorFacade() {      // cherche un mur d'immeuble droit, avec de la place devant
+    var P = X.P, S = X.canStandCity, radii = [4, 6, 8, 11, 15, 20, 26], i, k, j, t;
+    for (i = 0; i < radii.length; i++) for (k = 0; k < 24; k++) {
+      var a = k * Math.PI / 12, cx = P.x + Math.sin(a) * radii[i], cz = P.z + Math.cos(a) * radii[i];
+      if (!S(cx, cz)) continue;
+      for (j = 0; j < 16; j++) {
+        var b = j * Math.PI / 8, dx = Math.sin(b), dz = Math.cos(b), lx = cx, lz = cz, hit = false;
+        for (t = 0.25; t <= 3; t += 0.25) { var nx = cx + dx * t, nz = cz + dz * t; if (!S(nx, nz)) { hit = true; break; } lx = nx; lz = nz; }
+        if (!hit) continue;
+        var ux = -dx, uz = -dz, rx = -uz, rz = ux, px = lx + ux * 0.2, pz = lz + uz * 0.2, ok = true, s;
+        if (X.topAt) {                                   // le mur doit être un vrai bâtiment (pas un arbre ou une barrière)
+          var tall = false, q;
+          for (q = 0.2; q <= 0.9; q += 0.35) if (X.topAt(lx + dx * q, lz + dz * q) > X.groundAtCity(lx, lz) + 3) tall = true;
+          if (!tall) continue;
+        }
+        for (s = -1.2; s <= 1.2 && ok; s += 1.2) {         // mur droit sur ~2,4 m, et place devant
+          var qx = px + rx * s, qz = pz + rz * s;
+          if (!S(qx, qz) || S(qx + dx * 1.0, qz + dz * 1.0) || !S(qx + ux * 0.9, qz + uz * 0.9)) ok = false;
+        }
+        if (!ok || !S(px + ux * 1.8, pz + uz * 1.8)) continue;
+        api.addCityDoor({ x: px, z: pz, face: Math.atan2(ux, uz), layout: 'apartment', label: 'Appartement', ret: { x: px + ux * 1.8, z: pz + uz * 1.8 } });
+        showTitle('🏠 Porte de l\u2019appartement (cyan) à ~' + Math.round(radii[i]) + ' m');
+        return true;
+      }
+    }
+    return false;
+  }
+  function autoPlaceDoor() { if (!autoPlaceDoorFacade()) autoPlaceDoorRoad(); }
+  function autoPlaceDoorRoad() {
     var P = X.P, radii = [7, 9, 5, 11, 13], i, k;
     for (i = 0; i < radii.length; i++) for (k = 0; k < 12; k++) {
       var a = k * Math.PI / 6, x = P.x + Math.sin(a) * radii[i], z = P.z + Math.cos(a) * radii[i];
@@ -214,8 +242,9 @@
 
   /* ---------------------------------------------------------- entrer / sortir */
   function setCity(vis) {
-    var w = X.getWrap(); if (w) w.visible = vis;
-    X.ground.visible = vis; X.npcGroup.visible = vis; X.FX.position.y = vis ? 0 : -6000;
+    var w = X.getWrap(), show = vis || CFG.seeCity;
+    if (w) w.visible = show;
+    X.ground.visible = show; X.npcGroup.visible = vis; X.FX.position.y = show ? 0 : -6000;
     cityDoors.forEach(function (d) { d.mesh.visible = vis; });
   }
   api.enter = function (layoutId, opts) {
@@ -224,9 +253,11 @@
     var style = opts.style || CFG.style || 'modern', P = X.P;
     var ret = opts.ret || { x: P.x, z: P.z }, retFace = opts.retFace;
     fade(1, function () {
+      placeOrigin(layoutId);
       getInterior(layoutId, style).then(function (inst) {
         cur = inst; inst.ret = ret; inst.retFace = retFace; prevView = X.getView();
         X.setView(0, 0.2, CFG.camDist);
+        prevScale = P.m.scale.x; P.m.scale.setScalar(CFG.playerScale); prevFov = X.cam.fov; X.cam.fov = CFG.fov; X.cam.updateProjectionMatrix();
         var L = inst.L;
         P.x = inst.ox + L.spawn.x; P.z = inst.oz + L.spawn.z; P.y = inst.oy; P.face = L.spawn.face; P.spd = 0;
         api.cols = inst.cols; api.floorY = inst.oy; api.k = CFG.walkSpeedFactor; api.active = true;
@@ -240,12 +271,19 @@
     });
     return true;
   };
+  function placeOrigin(layoutId) {       // pose l'appartement au bord de la ville : les fenêtres donnent sur la ville
+    var ext = X.getExt ? X.getExt() : 0, L0 = NS.layouts[layoutId];
+    if (!CFG.seeCity || !(ext > 0) || !L0) return;
+    CFG.originX = -L0.size.w / 2; CFG.originZ = ext + CFG.edgeGap; CFG.originY = CFG.floorHeight;
+  }
+  api.light = function (sun, hemi) { if (api.active) { sun.intensity *= CFG.sunIndoor; hemi.intensity *= CFG.hemiIndoor; } };
   api.exit = function () {
     if (busy || !api.active) return false;
     busy = true;
     fade(1, function () {
       var inst = cur, P = X.P, r = inst.ret || { x: P.x, z: P.z };
       api.active = false; api.k = 1;
+      P.m.scale.setScalar(prevScale); X.cam.fov = prevFov; X.cam.updateProjectionMatrix();
       inst.group.visible = false; ambient.visible = false;
       slots.forEach(function (s) { s.light.visible = false; s.light.intensity = 0; });
       setCity(true);
