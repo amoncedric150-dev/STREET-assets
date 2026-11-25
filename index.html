@@ -739,7 +739,7 @@ const ST_RGH='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwU
 const ST_RE=/^CityGen_?Streets$/i,ST_M=3.0,STWET={value:1.0};
 const STC='uniform float uStWet;varying vec3 vStW;float stH(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}'+
  'float stN(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(stH(i),stH(i+vec2(1.0,0.0)),f.x),mix(stH(i+vec2(0.0,1.0)),stH(i+vec2(1.0,1.0)),f.x),f.y);}'+
- 'float stWet(vec2 p){float n=stN(p*0.045)*0.55+stN(p*0.13+7.0)*0.3+stN(p*0.5+3.0)*0.15;return smoothstep(0.5,0.68,n);}';
+ 'float stWet(vec2 p){float n=stN(p*0.11)*0.55+stN(p*0.29+7.0)*0.3+stN(p*0.9+3.0)*0.15;return smoothstep(0.6,0.74,n);}';
 function retexAsphalt(o,scl){
   const tl=new THREE.TextureLoader(),aniso=Math.min(8,r.capabilities.getMaxAnisotropy());
   const mk=(src,srgb)=>{const t=tl.load(src);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=aniso;if(srgb)t.encoding=THREE.sRGBEncoding;return t};
@@ -759,10 +759,10 @@ function retexAsphalt(o,scl){
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vStW;')
      .replace('#include <begin_vertex>','#include <begin_vertex>\nvStW=(modelMatrix*vec4(transformed,1.0)).xyz;');
     sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\n'+STC)
-     .replace('#include <map_fragment>','#include <map_fragment>\nfloat stP=stWet(vStW.xz)*uStWet;float stD=clamp(0.6*uStWet+stP,0.0,1.0);'+
-      'diffuseColor.rgb*=(0.85+0.3*stN(vStW.xz*0.09))*(1.0-0.45*stD);')
-     .replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=mix(roughnessFactor,0.32,0.55*uStWet);roughnessFactor=mix(roughnessFactor,0.04,stP);')
-     .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\nnormal=normalize(mix(normal,nonPerturbedNormal,clamp(stP*0.9,0.0,1.0)));')};
+     .replace('#include <map_fragment>','#include <map_fragment>\nfloat stP=stWet(vStW.xz)*uStWet;float stD=clamp(0.5*uStWet+stP,0.0,1.0);'+
+      'diffuseColor.rgb*=(0.85+0.3*stN(vStW.xz*0.09))*(1.0-0.5*stD);')
+     .replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=mix(roughnessFactor,0.42,0.45*uStWet);roughnessFactor=mix(roughnessFactor,0.1,stP);')
+     .replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\nnormal=normalize(mix(normal,nonPerturbedNormal,clamp(stP*0.6,0.0,1.0)));')};
    composeBC(m);if(old&&old!==map)old.dispose()});
   console.log('[goudron] maillages',n,'matériaux',mats.size,'sommets',nv);
   return n+' maillage(s), mouillé '+STWET.value}
