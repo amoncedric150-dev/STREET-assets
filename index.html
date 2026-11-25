@@ -978,8 +978,8 @@ function MK_plan(G,O){
  const BIG=65535,rx=new Uint16Array(N),rz=new Uint16Array(N);
  for(let j=0;j<Dz;j++){let i=0;while(i<Dx){if(!R[j*Dx+i]){i++;continue}let e=i;while(e<Dx&&R[j*Dx+e])e++;const L=(i===0||e===Dx)?BIG:Math.min(BIG-1,e-i);for(let q=i;q<e;q++)rx[j*Dx+q]=L;i=e}}
  for(let i=0;i<Dx;i++){let j=0;while(j<Dz){if(!R[j*Dx+i]){j++;continue}let e=j;while(e<Dz&&R[e*Dx+i])e++;const L=(j===0||e===Dz)?BIG:Math.min(BIG-1,e-j);for(let q=j;q<e;q++)rz[q*Dx+i]=L;j=e}}
- const wc=O.wcap/cm,C=new Uint8Array(N);
- for(let k=0;k<N;k++)if(R[k]){const a=rx[k]>wc,b=rz[k]>wc;C[k]=(!a&&b)?1:(a&&!b)?2:(a&&b)?3:0} // 1 = rue qui court en z · 2 = rue qui court en x · 3 = carrefour
+ const wc=O.wcap/cm,C=new Uint8Array(N),cls=[0,0,0,0];
+ for(let k=0;k<N;k++)if(R[k]){const a=rx[k]>wc,b=rz[k]>wc;C[k]=(!a&&b)?1:(a&&!b)?2:(a&&b)?3:0;cls[C[k]]++} // 1 = rue qui court en z · 2 = rue qui court en x · 3 = carrefour
  const lab=new Int32Array(N),st=new Int32Array(N),comps=[];
  for(let s0=0;s0<N;s0++){const c=C[s0];if((c!==1&&c!==2)||lab[s0])continue;
   const id=comps.length+1,cells=[];let sp=0;st[sp++]=s0;lab[s0]=id;
@@ -989,7 +989,7 @@ function MK_plan(G,O){
    if(p>=Dx&&C[p-Dx]===c&&!lab[p-Dx]){lab[p-Dx]=id;st[sp++]=p-Dx}
    if(p+Dx<N&&C[p+Dx]===c&&!lab[p+Dx]){lab[p+Dx]=id;st[sp++]=p+Dx}}
   comps.push({c,cells})}
- const out={white:[],yellow:[],tact:[],arrows:[],pmr:[],stats:{streets:0,skipped:0,crossings:0,pmr:0,tact:0,arrows:0,orient:0}};
+ const out={white:[],yellow:[],tact:[],arrows:[],pmr:[],stats:{cls,streets:0,skipped:0,crossings:0,pmr:0,tact:0,arrows:0,orient:0}};
  const hAtRoad=(x,z)=>MK_hAt(G,R,G.Y,x,z,G.baseY);
  let pmrCount=0;
  for(const cp of comps){
@@ -1077,20 +1077,22 @@ function mkCanvasTex(w,h,draw,srgb){const c=document.createElement('canvas');c.w
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
  o.updateMatrixWorld(true);
- const inv=new THREE.Matrix4().copy(o.matrixWorld).invert(),m=new THREE.Matrix4(),v=new THREE.Vector3(),road=[],walk=[];
+ const inv=new THREE.Matrix4().copy(o.matrixWorld).invert(),m=new THREE.Matrix4(),v=new THREE.Vector3(),road=[],walk=[],bb=new THREE.Box3(),sv=new THREE.Vector3();
  o.traverse(c=>{if(!c.isMesh||!c.geometry||!c.geometry.attributes.position||!visChainO(c))return;const ms=[].concat(c.material);
-  if(ms.some(x=>x&&ST_RE.test(x.name||'')))road.push(c);else if(ms.some(x=>x&&SW_RE.test(x.name||'')))walk.push(c)});
+  if(c.userData.decal)return;
+  if(ms.some(x=>x&&ST_RE.test(x.name||'')))road.push(c);
+  else{bb.setFromObject(c);bb.getSize(sv);if(Math.max(sv.x,sv.z)*s>=6||ms.some(x=>x&&SW_RE.test(x.name||'')))walk.push(c)}}); // gros objets (trottoirs, bâtiments) : le goudron qui passe dessous n'est pas une route
  if(!road.length)return 'aucun goudron « CityGen_Streets » trouvé';
  const tris=c=>{const g=c.geometry,pa=g.attributes.position,ix=g.index,n=ix?ix.count:pa.count,out=new Float32Array(n*3);m.copy(c.matrixWorld).premultiply(inv);
   for(let q=0;q<n;q++){v.fromBufferAttribute(pa,ix?ix.getX(q):q).applyMatrix4(m);out[q*3]=v.x;out[q*3+1]=v.y;out[q*3+2]=v.z}return out};
- const TR=road.map(tris),TW=walk.map(tris);let x0=1e18,x1=-1e18,z0=1e18,z1=-1e18;
- for(const a of TR.concat(TW))for(let i=0;i<a.length;i+=3){if(a[i]<x0)x0=a[i];if(a[i]>x1)x1=a[i];if(a[i+2]<z0)z0=a[i+2];if(a[i+2]>z1)z1=a[i+2]}
+ const TR=road.map(tris);let x0=1e18,x1=-1e18,z0=1e18,z1=-1e18;
+ for(const a of TR)for(let i=0;i<a.length;i+=3){if(a[i]<x0)x0=a[i];if(a[i]>x1)x1=a[i];if(a[i+2]<z0)z0=a[i+2];if(a[i+2]>z1)z1=a[i+2]}
  const cell=Math.max(x1-x0,z1-z0)/(IS_MOBILE?1100:1400),Dx=Math.ceil((x1-x0)/cell)+1,Dz=Math.ceil((z1-z0)/cell)+1,n=Dx*Dz;
  const G={Dx,Dz,cell,x0,z0,mpu:s,R:new Uint8Array(n),Y:new Float32Array(n),S:new Uint8Array(n),YS:new Float32Array(n),sw:walk.length>0,baseY:0};
- TR.forEach(a=>MK_raster(a,G,G.R,G.Y));TW.forEach(a=>MK_raster(a,G,G.S,G.YS));
+ TR.forEach(a=>MK_raster(a,G,G.R,G.Y));TR.length=0;walk.forEach(c=>MK_raster(tris(c),G,G.S,G.YS));
  let sy=0,cn=0;const lift=.06/s;
  for(let k=0;k<n;k++){if(G.R[k]&&G.S[k]&&G.YS[k]>G.Y[k]+lift)G.R[k]=0;if(G.R[k]){sy+=G.Y[k];cn++}} // trottoir plus haut que le goudron = pas une route
- if(cn<500)return 'goudron introuvable ('+cn+' cases)';G.baseY=sy/cn;
+ G.pct=Math.round(100*cn/n);if(cn<500)return 'goudron introuvable ('+cn+' cases)';G.baseY=sy/cn;
  const P=MK_plan(G),hf=(x,z)=>MK_hAt(G,G.R,G.Y,x,z,G.baseY),yo=MK.yOff/s,aniso=Math.min(8,r.capabilities.getMaxAnisotropy());
  const tl=new THREE.TextureLoader(),lineTex=src=>{const t=tl.load(src);t.encoding=THREE.sRGBEncoding;t.wrapS=THREE.ClampToEdgeWrapping;t.wrapT=THREE.MirroredRepeatWrapping;t.anisotropy=aniso;return t};
  const mat=(map,name)=>new THREE.MeshStandardMaterial({map,transparent:true,alphaTest:.03,roughness:.7,metalness:0,envMapIntensity:1.1,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2,name});
@@ -1117,7 +1119,7 @@ function buildMarkings0(o,sz,s){
  add(MK_quads(P.pmr,hf,s,yo*1.3),mat(pmr.tex,'Marquage_PMR'),'Marquage_PMR');
  if(grp.children.length)o.add(grp);
  const st=P.stats;console.log('[marquages]',st,'triangles',tri);
- return st.streets+' rues · '+st.crossings+' passages piétons · '+st.arrows+' flèches · '+st.pmr+' places PMR · '+st.tact+' dalles'+(st.skipped?' · '+st.skipped+' rues ignorées':'');
+ return 'route '+G.pct+'% · cases rue-z/rue-x/carrefour '+st.cls[1]+'/'+st.cls[2]+'/'+st.cls[3]+' · '+st.streets+' rues · '+st.crossings+' passages piétons · '+st.arrows+' flèches · '+st.pmr+' places PMR · '+st.tact+' dalles'+(st.skipped?' · '+st.skipped+' rues ignorées':'');
 }
 
 // ===== Fermeture de la ville : 2 rangées de vrais bâtiments du fichier (les plus hauts) autour du périmètre → plus aucune voie ouverte sur le vide =====
