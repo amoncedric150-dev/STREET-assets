@@ -55,7 +55,7 @@ const SKY={bg:SKY_BG_DATA,env:SKY_ENV_DATA,
 const scene=new THREE.Scene();scene.background=new THREE.Color(SKY.fog);scene.fog=new THREE.Fog(SKY.fog,300,2200);
 const cam=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,0.2,4000);
 const r=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
-r.setPixelRatio(Math.min(devicePixelRatio||1,1.5));r.setSize(innerWidth,innerHeight);r.outputEncoding=THREE.sRGBEncoding;r.toneMapping=THREE.ACESFilmicToneMapping;r.toneMappingExposure=(()=>{try{return parseFloat(localStorage.getItem('ny_expo_day'))||SKY.expo}catch(e){return SKY.expo}})();r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;
+r.setPixelRatio(Math.min(devicePixelRatio||1,1.5));r.setSize(innerWidth,innerHeight);r.outputEncoding=THREE.sRGBEncoding;r.toneMapping=THREE.ACESFilmicToneMapping;r.toneMappingExposure=(()=>{try{return parseFloat(localStorage.getItem('ny_expo_day'))||SKY.expo}catch(e){return SKY.expo}})();r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;r.shadowMap.autoUpdate=false;r.shadowMap.needsUpdate=true;
 document.body.prepend(r.domElement);
 r.debug.onShaderError=(gl,p,vs,fs)=>{try{msg.style.opacity=1;msg.textContent='ERREUR SHADER : '+(gl.getProgramInfoLog(p)||'')+' '+(gl.getShaderInfoLog(vs)||'')+' '+(gl.getShaderInfoLog(fs)||'')}catch(e){}};
 const hemi=new THREE.HemisphereLight(0xcfe4ff,0x8a8f94,SKY.hemiI);scene.add(hemi);
@@ -401,7 +401,7 @@ function updateLampFX(now,Lv){
   return any}
 // ombre du soleil / de la lune : la caméra d'ombre suit le joueur, calée sur la grille de texels DANS L'ESPACE DE LA LUMIÈRE (pas de scintillement pendant que le soleil tourne)
 function placeSun(){
-  const z=SUNDIR,xl=Math.hypot(z.z,z.x)||1,xx=z.z/xl,xz=-z.x/xl,yx=z.y*xz,yy=z.z*xx-z.x*xz,yz=-z.y*xx,q=2*180/2048;
+  const z=SUNDIR,xl=Math.hypot(z.z,z.x)||1,xx=z.z/xl,xz=-z.x/xl,yx=z.y*xz,yy=z.z*xx-z.x*xz,yz=-z.y*xx,q=4*SH_R/SH_N;
   const a=P.x*xx+P.z*xz,b=P.x*yx+P.y*yy+P.z*yz,da=a-Math.round(a/q)*q,db=b-Math.round(b/q)*q;
   sun.target.position.set(P.x-da*xx-db*yx,P.y-db*yy,P.z-da*xz-db*yz);sun.target.updateMatrixWorld();
   sun.position.copy(sun.target.position).addScaledVector(SUNDIR,300)}
@@ -472,6 +472,15 @@ let box0=null,s0=1,uf=1,MAP=null,selBox=null;
 // ===== OPTIMISATION des blocs (sans effet visible) =====
 // 1) une tuile hors de l'écran ET hors de la zone d'ombre n'est plus parcourue du tout
 // 2) les tuiles très lointaines (> TC_SHADOW m) ne projettent plus d'ombre (leurs meshes restent affichés normalement)
+// ===== Ombres adaptatives (mobile) : l'appareil mesure sa fluidité et allège les ombres tout seul si besoin, sans saccade ni clignotement =====
+// [taille de la carte d'ombre, rayon couvert autour du joueur (m), recalcul toutes les N images (toujours 1 : ombre recalculée à chaque image)]
+const SH_T=[[2048,90,1],[1024,70,1],[1024,56,1],[512,44,1]];
+let SH_Q=-1,SH_N=2048,SH_R=90,SH_K=1,_shF=0,_ftE=0,_ftT=0,_ftN=0;
+function shApply(q){SH_Q=q;const t=SH_T[q];SH_N=t[0];SH_R=t[1];SH_K=t[2];const sc=sun.shadow.camera;sc.left=sc.bottom=-SH_R;sc.right=sc.top=SH_R;sc.updateProjectionMatrix();
+ if(sun.shadow.mapSize.x!==SH_N){sun.shadow.mapSize.set(SH_N,SH_N);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null}}}
+function shAdapt(){if(SH_Q<0||!MAP||!TILECULL)return;const n=performance.now(),d=n-_ftT;_ftT=n;if(d<=0||d>250)return;
+ _ftE=_ftE?_ftE+(d-_ftE)*.03:d;if(++_ftN>240&&_ftE>25&&SH_Q<SH_T.length-1){shApply(SH_Q+1);_ftE=0;_ftN=0}} // < 40 i/s pendant ~4 s : on passe au niveau d'ombre suivant (jamais de retour en arrière)
+if(IS_MOBILE){r.shadowMap.type=THREE.PCFShadowMap;sun.shadow.radius=1.6;shApply(1)} // mobile : filtre d'ombre 4× moins coûteux + carte 1024
 let _bootDone=false;
 function bootSet(t,p){const m=document.getElementById('bootM'),b=document.getElementById('bootBar');if(m)m.textContent=t;if(b)b.style.width=Math.round(Math.min(1,p)*100)+'%'}
 function bootHide(){if(_bootDone)return;_bootDone=true;const e=document.getElementById('boot');if(!e)return;e.style.opacity=0;e.style.pointerEvents='none';setTimeout(()=>e.remove(),900)}
@@ -979,6 +988,6 @@ let tPrev=performance.now()/1000;
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
  todStep(dt,now);
  INTERIORS.api.light(sun,hemi);
- tileCull();
+ tileCull();shAdapt();r.shadowMap.needsUpdate=!MAP||SH_K===1||((++_shF)%SH_K===0);
  try{r.render(scene,cam)}catch(e){if(!restoreTrees(e)){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
 </script></body></html>
