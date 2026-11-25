@@ -16,7 +16,10 @@
   NS.CONFIG = NS.CONFIG || {
     // L'intérieur est construit loin au-dessus de la ville (aucune interférence, la ville est masquée dedans)
     originX: 0, originY: 800, originZ: 0,
-    camDist: 3.4,            // distance caméra 3e personne à l'intérieur
+    camDist: 3.0,            // distance caméra 3e personne à l'intérieur
+    camPitch: 0.3,           // inclinaison de la caméra à l'entrée (plus grand = vue plus d'en haut)
+    camMin: 1.7,             // distance minimale caméra-joueur quand un mur la gêne (plus grand = caméra moins collée)
+    camMargin: 0.1,          // marge de la caméra autour des murs (m)
     walkSpeedFactor: 0.55,   // vitesse du joueur à l'intérieur (1 = vitesse de la rue)
     playerRadius: 0.30,      // rayon de collision du joueur (m)
     ambient: 0.55, ambientColor: 0xfff2e0,          // lumière de base (réglage « trop sombre / trop clair »)
@@ -25,8 +28,10 @@
     doorOpenAngle: 1.75, doorSpeed: 5.0, doorOpenDist: 1.5, doorCloseDist: 2.3,
     modelsPath: 'Models/interiors/',                // dossier des GLB de meubles (à côté de index.html)
     seeCity: true,           // true = la ville reste visible par les fenêtres (l'appartement flotte au bord de la ville)
-    floorHeight: 12,         // hauteur du sol de l'appartement au-dessus de la rue (m), si seeCity
-    edgeGap: 50,             // distance entre le bord de la ville et l'appartement (m), si seeCity
+    floorHeight: 12,         // hauteur minimale du sol de l'appartement au-dessus de la rue (m), si seeCity
+    viewHeightFactor: 0.8,   // hauteur du sol = cette part de la hauteur moyenne des immeubles (pour voir par-dessus la ville)
+    viewHeightMax: 60,       // hauteur maximale du sol de l'appartement (m)
+    edgeGap: 20,             // distance entre le bord des immeubles et l'appartement (m), si seeCity
     playerScale: 0.8,        // taille du personnage à l'intérieur (1 = taille normale)
     fov: 75,                 // champ de vision de la caméra à l'intérieur (la ville reste à 62)
     sunIndoor: 0.35, hemiIndoor: 0.6,   // part de la lumière du jour qui entre dans l'appartement

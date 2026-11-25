@@ -256,7 +256,7 @@
       placeOrigin(layoutId);
       getInterior(layoutId, style).then(function (inst) {
         cur = inst; inst.ret = ret; inst.retFace = retFace; prevView = X.getView();
-        X.setView(0, 0.2, CFG.camDist);
+        X.setView(0, CFG.camPitch, CFG.camDist);
         prevScale = P.m.scale.x; P.m.scale.setScalar(CFG.playerScale); prevFov = X.cam.fov; X.cam.fov = CFG.fov; X.cam.updateProjectionMatrix();
         var L = inst.L;
         P.x = inst.ox + L.spawn.x; P.z = inst.oz + L.spawn.z; P.y = inst.oy; P.face = L.spawn.face; P.spd = 0;
@@ -271,10 +271,11 @@
     });
     return true;
   };
-  function placeOrigin(layoutId) {       // pose l'appartement au bord de la ville : les fenêtres donnent sur la ville
-    var ext = X.getExt ? X.getExt() : 0, L0 = NS.layouts[layoutId];
-    if (!CFG.seeCity || !(ext > 0) || !L0) return;
-    CFG.originX = -L0.size.w / 2; CFG.originZ = ext + CFG.edgeGap; CFG.originY = CFG.floorHeight;
+  function placeOrigin(layoutId) {       // pose l'appartement face aux immeubles : les fenêtres du nord donnent sur la ville
+    var L0 = NS.layouts[layoutId], cs = CFG.seeCity && X.cityStats ? X.cityStats() : null;
+    if (!cs || !L0) return;
+    var cx = (cs.x0 + cs.x1) / 2, h = Math.min(CFG.viewHeightMax, Math.max(CFG.floorHeight, cs.meanH * CFG.viewHeightFactor));
+    CFG.originX = cx - L0.size.w / 2; CFG.originZ = cs.z1 + CFG.edgeGap; CFG.originY = X.groundAtCity(cx, cs.z1) + h;
   }
   api.light = function (sun, hemi) { if (api.active) { sun.intensity *= CFG.sunIndoor; hemi.intensity *= CFG.hemiIndoor; } };
   api.exit = function () {
@@ -299,15 +300,15 @@
   /* ------------------------------------------------- appelés par le jeu (hooks) */
   api.canStand = function (x, z) { return !T.circleHits(api.cols, x, z, CFG.playerRadius); };
   api.camHit = function (x, y, z) {                       // la caméra est arrêtée par les murs, portes fermées, plafond et grands meubles
-    var cols = api.cols, i, c, mg = 0.2;
+    var cols = api.cols, i, c, mg = CFG.camMargin;
     for (i = 0; i < cols.length; i++) {
-      c = cols[i]; if (!c.cam || (c.door && !c.body)) continue;
+      c = cols[i]; if (!c.cam || c.door) continue;                  // la caméra traverse les portes
       if (x > c.x0 - mg && x < c.x1 + mg && z > c.z0 - mg && z < c.z1 + mg && y > c.y0 - mg && y < c.y1 + mg) return true;
     }
     return false;
   };
   api.attach = function (c) {
-    X = c; THREE = c.THREE;
+    X = c; THREE = c.THREE; api.camMin = CFG.camMin;
     ambient = new THREE.AmbientLight(CFG.ambientColor, CFG.ambient); ambient.visible = false; X.scene.add(ambient);
     for (var i = 0; i < SLOTS; i++) {
       var l = new THREE.PointLight(0xffe2b8, 0, CFG.lightDistance, CFG.lightDecay); l.visible = false; X.scene.add(l);

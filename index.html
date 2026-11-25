@@ -28,7 +28,7 @@ button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;pad
 <script src="models.js"></script>
 <script src="runtime.js"></script>
 <script>/* sécurité : si un fichier des intérieurs manque, la ville continue de fonctionner normalement */
-if(!(window.INTERIORS&&INTERIORS.api&&INTERIORS.api.attach)){console.warn("[INTERIORS] fichiers manquants : intérieurs désactivés");window.INTERIORS={api:{active:false,k:1,floorY:0,frame(){},light(){},attach(){},canStand(){return true},camHit(){return false}}}}</script>
+if(!(window.INTERIORS&&INTERIORS.api&&INTERIORS.api.attach)){console.warn("[INTERIORS] fichiers manquants : intérieurs désactivés");window.INTERIORS={api:{active:false,k:1,floorY:0,frame(){},light(){},camMin:1.1,attach(){},canStand(){return true},camHit(){return false}}}}</script>
 <script>
 // Images du ciel intégrées directement dans le code (aucun fichier à héberger)
 // SKY2 = lever de soleil (MorningSkyHDRI007B) · SKY3 = nuit étoilée (ancienne) · SKY4 = nuit étoilée (NightSkyHDRI013) · le ciel « crépuscule avec arbres » a été supprimé
@@ -695,7 +695,7 @@ function updateCam(dt,now){
  const hx=P.x,hy=P.y+1.6*P.m.scale.x,hz=P.z;
  if((jx||jy)&&jy>-.3&&now-lastDrag>1.2)yaw=turnTo(yaw,P.face+Math.PI,1.3*dt); // se replace doucement derrière le personnage
  const cp=Math.cos(pitch),dx=Math.sin(yaw)*cp,dy=Math.sin(pitch),dz=Math.cos(yaw)*cp;
- let d=wantDist;for(let t=.6;t<=wantDist;t+=.4){if(INTERIORS.api.active?INTERIORS.api.camHit(hx+dx*t,hy+dy*t,hz+dz*t):topAt(hx+dx*t,hz+dz*t)>hy+dy*t-.25){d=Math.max(INTERIORS.api.active?.8:1.1,t-.5);break}}
+ let d=wantDist;for(let t=.6;t<=wantDist;t+=.4){if(INTERIORS.api.active?INTERIORS.api.camHit(hx+dx*t,hy+dy*t,hz+dz*t):topAt(hx+dx*t,hz+dz*t)>hy+dy*t-.25){d=Math.max(INTERIORS.api.active?INTERIORS.api.camMin:1.1,t-.5);break}}
  camDist+=(d-camDist)*Math.min(1,(d<camDist?14:3)*dt);
  cam.position.set(hx+dx*camDist,hy+dy*camDist,hz+dz*camDist);
  const gy=groundAt(cam.position.x,cam.position.z)+.3;if(cam.position.y<gy)cam.position.y=gy;
@@ -828,7 +828,8 @@ tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scen
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
 
 // ===== Système d'intérieurs (appartements) : branché sur le joueur P, la caméra et le chargeur GLB existants =====
-INTERIORS.api.attach({THREE,topAt,getExt:()=>EXT,scene,cam,renderer:r,P,ground,npcGroup,FX,loader,msg,applyShadows,groundAtCity,canStandCity,
+function cityStats(){let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9,n=0,sh=0;for(let k=0;k<N*N;k++){if(!MAP.has[k])continue;const p=cellXZ(k);if(p[0]<x0)x0=p[0];if(p[0]>x1)x1=p[0];if(p[1]<z0)z0=p[1];if(p[1]>z1)z1=p[1];n++;sh+=MAP.H[k]}return n?{x0,x1,z0,z1,meanH:sh/n-MAP.g}:null}
+INTERIORS.api.attach({THREE,topAt,cityStats,scene,cam,renderer:r,P,ground,npcGroup,FX,loader,msg,applyShadows,groundAtCity,canStandCity,
  get base(){return base},getWrap:()=>wrap,
  getView:()=>({yaw,pitch,dist:wantDist}),setView:(y,p,d)=>{yaw=y;pitch=p;wantDist=d;camDist=d}});
 // ===== Boucle =====
