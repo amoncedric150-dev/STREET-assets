@@ -692,7 +692,7 @@ function updateCam(dt,now){
 
 // ===== Chargement =====
 const KILLRE=/^Object_118(_\d+)?$/; // « Object_118 » (dalle beige 79 × 102 m) et ses copies éventuelles
-const KILL=['Object_61','Object_30']; // noms d'objets à supprimer pour de bon (ajoute-en d'autres ici si besoin) — Object_30 = « Street_Assets » (mobilier de trottoir : lampes, poubelles, bancs, barrières), à recréer proprement
+const KILL=['Object_61','Object_30','Object_32','Object_42']; // noms d'objets à supprimer pour de bon (ajoute-en d'autres ici si besoin) — Object_30 + Object_32 = « Street_Assets » (mobilier de trottoir : lampes, poubelles, bancs, barrières), Object_42 = « CityGen_Grass » (carrés au sol, fosses d'arbres), à recréer proprement
 function start(o){
  clean(o);o.updateMatrixWorld(true);
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
