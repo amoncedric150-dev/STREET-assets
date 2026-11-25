@@ -45,6 +45,7 @@ const cam=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,0.2,4000);
 const r=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
 r.setPixelRatio(Math.min(devicePixelRatio||1,1.5));r.setSize(innerWidth,innerHeight);r.outputEncoding=THREE.sRGBEncoding;r.toneMapping=THREE.ACESFilmicToneMapping;r.toneMappingExposure=(()=>{try{return parseFloat(localStorage.getItem('ny_expo_day'))||SKY.expo}catch(e){return SKY.expo}})();r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;
 document.body.prepend(r.domElement);
+r.debug.onShaderError=(gl,p,vs,fs)=>{try{msg.style.opacity=1;msg.textContent='ERREUR SHADER : '+(gl.getProgramInfoLog(p)||'')+' '+(gl.getShaderInfoLog(vs)||'')+' '+(gl.getShaderInfoLog(fs)||'')}catch(e){}};
 const hemi=new THREE.HemisphereLight(0xcfe4ff,0x8a8f94,SKY.hemiI);scene.add(hemi);
 const _a=SKY.sunAz*Math.PI/180,_e=SKY.sunEl*Math.PI/180;
 const SUNDIR=new THREE.Vector3(Math.cos(_e)*Math.cos(_a),Math.sin(_e),Math.cos(_e)*Math.sin(_a)).normalize(); // même repère que l'équirectangulaire three.js
@@ -717,7 +718,7 @@ function retexSidewalk(o,sz,scl){
     v.fromBufferAttribute(pa,i).applyMatrix4(mw).multiplyScalar(scl); // mètres
     nu[i*2]=v.x/PER;nu[i*2+1]=v.z/PER}
    g.setAttribute('uvOld',new THREE.BufferAttribute(old,2));
-   g.setAttribute('uv',new THREE.BufferAttribute(nu,2));nv+=cnt});
+   g.setAttribute('uv',new THREE.BufferAttribute(nu,2));if(g.attributes.tangent)g.deleteAttribute('tangent');nv+=cnt});
   mats.forEach(m=>{const om=m.map; // ancienne texture : on ne garde que son alpha
    if(om){om.updateMatrix();const OM=om.matrix.clone();
     m.userData.swBC=sh=>{sh.uniforms.uSwOld={value:om};sh.uniforms.uSwM={value:OM};
@@ -737,7 +738,7 @@ const ST_RGH='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDAwMDAgQ
 // ===== Goudron : TA texture d'asphalte telle quelle (COL = couleur · NRM = normale · GLOSS inversé = rugosité · AO = occlusion) =====
 // Aucun effet mouillé pour l'instant (réglage à faire ensuite). Seul le matériau « CityGen_Streets » est remplacé ; projection vue du dessus : ST_M = taille réelle d'UNE répétition (m).
 // ST_ROUGH multiplie la rugosité de ta carte GLOSS : plus petit = plus brillant (1 = tel que dans ta texture) · ST_AOI = force de l'AO
-const ST_RE=/^CityGen_?Streets$/i,ST_M=3.0,ST_ROUGH=0.6,ST_AOI=1.0;
+const ST_RE=/^CityGen_?Streets$/i,ST_M=1.0,ST_ROUGH=0.6,ST_AOI=1.0;
 function retexAsphalt(o,scl){
   const tl=new THREE.TextureLoader(),aniso=Math.min(8,r.capabilities.getMaxAnisotropy());
   const mk=(src,srgb)=>{const t=tl.load(src);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=aniso;if(srgb)t.encoding=THREE.sRGBEncoding;return t};
@@ -749,13 +750,15 @@ function retexAsphalt(o,scl){
    const g=c.geometry,pa=g.attributes.position;if(!pa||gd.has(g))return;gd.add(g);
    const cnt=pa.count,nu=new Float32Array(cnt*2),mw=c.matrixWorld;
    for(let i=0;i<cnt;i++){v.fromBufferAttribute(pa,i).applyMatrix4(mw).multiplyScalar(scl);nu[i*2]=v.x/ST_M;nu[i*2+1]=v.z/ST_M}
-   g.setAttribute('uv',new THREE.BufferAttribute(nu,2));g.setAttribute('uv2',new THREE.BufferAttribute(nu.slice(),2));nv+=cnt});
+   g.setAttribute('uv',new THREE.BufferAttribute(nu,2));g.setAttribute('uv2',new THREE.BufferAttribute(nu.slice(),2));if(g.attributes.tangent)g.deleteAttribute('tangent');nv+=cnt});
   mats.forEach(m=>{const old=m.map;
-   m.color.set(0xffffff);m.map=map;m.normalMap=nor;m.normalScale.set(1,1); // normale OpenGL : si les reliefs semblent inversés, mets (1,-1)
+   m.color.set(/goudron/.test(location.hash)?0xff5050:0xffffff);m.map=map;m.normalMap=nor;m.normalScale.set(1,1); // normale OpenGL : si les reliefs semblent inversés, mets (1,-1) · TEST : ajoute #goudron à la fin de l'adresse → le goudron devient rouge si la texture est bien sur la route
    m.roughnessMap=rgh;m.roughness=ST_ROUGH;m.metalnessMap=null;m.metalness=0;m.aoMap=ao;m.aoMapIntensity=ST_AOI;
    m.needsUpdate=true;if(old&&old!==map)old.dispose()});
+  try{const gm=ground.material,R=6000/ST_M,mg=(src,srgb)=>{const t=mk(src,srgb);t.repeat.set(R,R);return t};
+   gm.color.set(0xffffff);gm.map=mg(ST_COL,true);gm.normalMap=mg(ST_NRM,false);gm.normalScale.set(1,1);gm.roughnessMap=mg(ST_RGH,false);gm.roughness=ST_ROUGH;gm.needsUpdate=true}catch(e){console.warn('sol',e)}
   console.log('[goudron] maillages',n,'matériaux',mats.size,'sommets',nv);
-  return n+' maillage(s), texture complète'}
+  return 'v4 · '+n+' maillage(s) + sol'}
 function start(o){
  clean(o);o.updateMatrixWorld(true);
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
