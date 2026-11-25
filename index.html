@@ -14,7 +14,11 @@ canvas{display:block;touch-action:none}
 button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;padding:8px 12px;font-size:13px}
 #joy{position:fixed;left:50%;bottom:calc(30px + env(safe-area-inset-bottom));width:120px;height:120px;margin-left:-60px;border-radius:50%;border:3px solid #35e0ff;box-shadow:0 0 14px #35e0ff99,inset 0 0 14px #35e0ff55;background:rgba(20,40,70,.35);touch-action:none}
 #knob{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#9fd8ff 45%,#3a7fc0);box-shadow:0 2px 8px #0008;pointer-events:none}
+#boot{position:fixed;left:0;top:0;right:0;bottom:0;z-index:99;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:linear-gradient(#7fb0e0,#cfe0ee);color:#fff;transition:opacity .7s;font-family:system-ui,sans-serif;text-shadow:0 1px 6px #0006}
+#bootT{font-size:26px;font-weight:700;letter-spacing:.5px}#bootM{font-size:14px;opacity:.95}
+#bootB{width:min(70vw,320px);height:8px;border-radius:6px;background:#ffffff55;overflow:hidden}#bootBar{display:block;height:100%;width:3%;background:#fff;border-radius:6px;transition:width .3s}
 </style></head><body>
+<div id="boot"><div id="bootT">Ville 3D · New York</div><div id="bootB"><i id="bootBar"></i></div><div id="bootM">Chargement…</div></div>
 <div id="msg">Chargement…</div>
 <div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button><button id="clk">12:00</button><button id="bpz">⏸</button><button id="bnx">Phase ▶</button><button id="be1">Lumière −</button><button id="be2">Lumière +</button><button id="bsh">Ombres : oui</button><button id="bi">Inspecter</button></div>
 <div id="insp"><pre id="ii">Touche un objet de la ville pour voir son nom.</pre><div class="ir"><button id="ih">Masquer</button><button id="in">Même nom</button><button id="im">Même matériau</button></div><div class="ir"><button id="iu">Annuler</button><button id="il">Liste</button><button id="il2">Lampe</button><button id="iw">Fenêtre</button></div><textarea id="it" readonly></textarea></div>
@@ -423,7 +427,7 @@ function clean(root){const k=[];root.traverse(o=>{if(o.isPoints||o.isLine)k.push
  root.traverse(o=>{if(o.isMesh)[].concat(o.material).forEach(m=>{if(m&&((m.transparent&&m.opacity<.15)||m.colorWrite===false))m.visible=false})})}
 // Arbres du fichier : un seul gros mesh de feuilles (matériaux « FoliageTrees… ») et un d'écorce (« CityGenBark… ») par tuile
 let TDEAD=false;
-addEventListener('error',e=>{msg.style.opacity=1;msg.textContent='Erreur : '+e.message+' ('+String(e.filename||'').split('/').pop()+':'+e.lineno+')'});
+addEventListener('error',e=>{bootHide();msg.style.opacity=1;msg.textContent='Erreur : '+e.message+' ('+String(e.filename||'').split('/').pop()+':'+e.lineno+')'});
 function restoreTrees(e){if(TDEAD)return false;TDEAD=true;let n=0;
  if(wrap)wrap.traverse(c=>{if(c.isMesh){const ms=[].concat(c.material);if(ms.length&&ms.every(m=>m&&TREE_MAT.test(m.name||''))){c.visible=true;n++}}});
  if(!n)return false;setTimeout(()=>{if(MAP&&wrap)buildMap()},100);msg.style.opacity=1;msg.textContent='Suppression des arbres annulée (erreur : '+((e&&e.message)||e)+')';return true}
@@ -462,9 +466,34 @@ function animate(h,dt,spd){const u=h.userData;u.ph+=dt*(3+spd*1.6);const a=Math.
 function turnTo(cur,tgt,k){let d=tgt-cur;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return cur+d*Math.min(1,k)}
 
 // ===== Ville : new_york_city.glb répété en 3x3 (miroirs = routes qui se raccordent) =====
-const TARGET=350,TILES=3,EXTRA=[[2,-1],[2,0],[2,1],[3,-1],[3,0],[3,1],[4,-1],[4,0],[4,1]]; // EXTRA = blocs ajoutés en plus du 3x3 : [colonne, ligne] par rapport au bloc central [0,0] (ex. [[2,0],[2,1]] pour en ajouter deux)
+const TARGET=350,TILES=3,EXTRA=[[2,-1],[2,0],[2,1],[3,-1],[3,0],[3,1],[-1,2],[0,2],[1,2],[2,2],[3,2]]; // EXTRA = blocs ajoutés en plus du 3x3 : [colonne, ligne] par rapport au bloc central [0,0] (ex. [[2,0],[2,1]] pour en ajouter deux)
 let TX=TILES,TZ=TILES; // largeur d'un bloc en mètres (échelle validée) et nombre de blocs par côté
 let box0=null,s0=1,uf=1,MAP=null,selBox=null;
+// ===== OPTIMISATION des blocs (sans effet visible) =====
+// 1) une tuile hors de l'écran ET hors de la zone d'ombre n'est plus parcourue du tout
+// 2) les tuiles très lointaines (> TC_SHADOW m) ne projettent plus d'ombre (leurs meshes restent affichés normalement)
+let _bootDone=false;
+function bootSet(t,p){const m=document.getElementById('bootM'),b=document.getElementById('bootBar');if(m)m.textContent=t;if(b)b.style.width=Math.round(Math.min(1,p)*100)+'%'}
+function bootHide(){if(_bootDone)return;_bootDone=true;const e=document.getElementById('boot');if(!e)return;e.style.opacity=0;e.style.pointerEvents='none';setTimeout(()=>e.remove(),900)}
+const TILEG=[];                      // {g:groupe, cast:[meshes], vis:bool, sh:bool}
+let TILECULL=false;
+const TC_NEAR=150,TC_SHADOW=450,TC_HYST=40;
+const _tcPM=new THREE.Matrix4(),_tcFC=new THREE.Frustum(),_tcFS=new THREE.Frustum(),_tcBB=new THREE.Box3();
+function tileShowAll(){TILEG.forEach(t=>{t.g.visible=true;t.vis=true;if(!t.sh){t.cast.forEach(m=>m.castShadow=true);t.sh=true}})} // avant toute capture de la carte
+function tileCull(){
+ if(!TILECULL||!TILEG.length||!MAP||!wrap)return;
+ const s=wrap.scale.x,hx=box0.x*s/2*1.05+10,hz=box0.z*s/2*1.05+10,hy=box0.y*s*1.1+10;
+ cam.updateMatrixWorld();_tcPM.multiplyMatrices(cam.projectionMatrix,cam.matrixWorldInverse);_tcFC.setFromProjectionMatrix(_tcPM);
+ const sc=sun.shadow.camera;_tcPM.multiplyMatrices(sc.projectionMatrix,sc.matrixWorldInverse);_tcFS.setFromProjectionMatrix(_tcPM);
+ for(const t of TILEG){
+  const cx=t.g.position.x*s,cz=t.g.position.z*s;
+  _tcBB.min.set(cx-hx,-5,cz-hz);_tcBB.max.set(cx+hx,hy,cz+hz);
+  const d=Math.hypot(Math.max(Math.abs(P.x-cx)-hx,0),Math.max(Math.abs(P.z-cz)-hz,0));
+  const vis=d<TC_NEAR||_tcFC.intersectsBox(_tcBB)||(sun.castShadow&&_tcFS.intersectsBox(_tcBB));
+  if(vis!==t.vis){t.vis=vis;t.g.visible=vis}
+  const sh=t.sh?d<TC_SHADOW+TC_HYST:d<TC_SHADOW-TC_HYST; // hystérésis : pas d'aller-retour
+  if(sh!==t.sh){t.sh=sh;for(const m of t.cast)m.castShadow=sh}}}
+
 try{uf=parseFloat(localStorage.getItem('ny_scale'))||1}catch(e){}
 const SH=11,N=1<<SH,NN=N*N;
 const ortho=new THREE.OrthographicCamera(-1,1,1,-1,.1,100);
@@ -555,7 +584,7 @@ function openMask(m,r){ // m modifié sur place
 let HN=0;
 // Carte des hauteurs (sol, collisions, caméra)
 function buildMap(){
- const s=s0*uf;wrap.scale.setScalar(s);wrap.updateMatrixWorld(true);
+ tileShowAll();const s=s0*uf;wrap.scale.setScalar(s);wrap.updateMatrixWorld(true);
  const W=box0.x*TX*s,D=box0.z*TZ*s,sy=box0.y*s,S=Math.max(W,D)+4,half=S/2;
  hmat.uniforms.uMin.value=0;hmat.uniforms.uRange.value=sy+2;
  ortho.left=-half;ortho.right=half;ortho.top=half;ortho.bottom=-half;ortho.near=.1;ortho.far=sy+30;ortho.updateProjectionMatrix();
@@ -915,7 +944,7 @@ function start(o){
  TX=Mi-mi+1;TZ=Mj-mj+1;const ci=(mi+Mi)/2,cj=(mj+Mj)/2; // ville recentrée sur l'origine
  for(const[i,j]of TL){const tg=new THREE.Group();
   tg.position.set((i-ci)*sz.x,0,(j-cj)*sz.z);tg.scale.set(Math.abs(i)%2?-1:1,1,Math.abs(j)%2?-1:1); // miroirs alternés : les routes se raccordent
-  if(i===0&&j===0)tg.add(o);else fillTile(tg,o,info);wrap.add(tg)}
+  if(i===0&&j===0)tg.add(o);else fillTile(tg,o,info);wrap.add(tg);{const cast=[];tg.traverse(c=>{if(c.isMesh)cast.push(c)});TILEG.push({g:tg,cast,vis:true,sh:true})}}
  outerG=new THREE.Group();const R=cc+RING;
  for(let i=-R;i<=R;i++)for(let j=-R;j<=R;j++){if(Math.abs(i)<=cc&&Math.abs(j)<=cc)continue;
   const tg=new THREE.Group();tg.position.set(i*sz.x,0,j*sz.z);tg.scale.set(Math.abs(i)%2?-1:1,1,Math.abs(j)%2?-1:1);
@@ -923,9 +952,9 @@ function start(o){
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
  msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW;
- setTimeout(()=>msg.style.opacity=0,7000)}
-tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
- e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
+ TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,7000)}
+tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();throw err}},40))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
+ e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
 
 // ===== Système d'intérieurs (appartements) : branché sur le joueur P, la caméra et le chargeur GLB existants =====
 function cityStats(){let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9,n=0,sh=0;for(let k=0;k<N*N;k++){if(!MAP.has[k])continue;const p=cellXZ(k);if(p[0]<x0)x0=p[0];if(p[0]>x1)x1=p[0];if(p[1]<z0)z0=p[1];if(p[1]>z1)z1=p[1];n++;sh+=MAP.H[k]}return n?{x0,x1,z0,z1,meanH:sh/n-MAP.g}:null}
@@ -950,5 +979,6 @@ let tPrev=performance.now()/1000;
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
  todStep(dt,now);
  INTERIORS.api.light(sun,hemi);
+ tileCull();
  try{r.render(scene,cam)}catch(e){if(!restoreTrees(e)){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
 </script></body></html>
