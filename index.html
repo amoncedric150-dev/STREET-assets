@@ -740,7 +740,7 @@ const ST_RGH='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgM
 // ST_ROUGH multiplie la rugosité de ta carte GLOSS : plus petit = plus brillant (1 = tel que dans ta texture) · ST_AOI = force de l'AO
 const ST_RE=/^CityGen_?Streets$/i,ST_M=1.0,ST_ROUGH=0.6,ST_AOI=1.0;
 // RÉGLAGES : ST_NRMS = relief des grains (1 = normal, 2 = très marqué) · ST_WET = humidité globale (0 = sec, 1 = trempé) · ST_PUD = seuil des flaques (0.45 = beaucoup, 0.7 = très peu) · ST_GRAIN = force du grain fin de près
-const ST_NRMS=1.8,ST_WET=0.85,ST_PUD=0.56,ST_GRAIN=0.35;
+const ST_NRMS=2.6,ST_WET=0.85,ST_PUD=0.56,ST_GRAIN=0.35;
 const WETGLSL=`
 float wH(vec2 p){p=mod(p,251.0);return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float wN(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(wH(i),wH(i+vec2(1.0,0.0)),f.x),mix(wH(i+vec2(0.0,1.0)),wH(i+vec2(1.0,1.0)),f.x),f.y);}
