@@ -798,7 +798,42 @@ function retexAsphalt(o,scl){
    gm.color.set(0xffffff);gm.map=mg(ST_COL,true);gm.normalMap=mg(ST_NRM,false);gm.normalScale.set(1,1);gm.roughnessMap=mg(ST_RGH,false);gm.roughness=ST_ROUGH;gm.normalScale.set(ST_NRMS,ST_NRMS);gm.envMapIntensity=1.2;gm.userData.stBC=WETBC;composeBC(gm)}catch(e){console.warn('sol',e)}
   console.log('[goudron] maillages',n,'matériaux',mats.size,'sommets',nv);
   return 'v5 mouillé · '+n+' maillage(s) + sol'}
-function start(o){
+// ===== Auvents : Object_63 (panneau vert) découpé en auvents individuels, remplacés par 3 modèles du R2 =====
+const AWN_URLS=[R2+'Auvent/awning.glb',R2+'Auvent/cc0_-_awning.glb',R2+'Auvent/skyshadestm_-_skyline_-_night_view.glb'];
+function loadAwnings(cb){const out=[];let n=AWN_URLS.length;
+ AWN_URLS.forEach((u,i)=>loader.load(u,g=>{out[i]=g.scene;if(!--n)cb(out.filter(Boolean))},null,()=>{console.warn('[auvents] échec',u);if(!--n)cb(out.filter(Boolean))}))}
+function placeAwnings(o,models){
+ if(!models||!models.length)return 0;
+ const targets=[];o.traverse(c=>{if(c.isMesh&&c.geometry&&c.name==='Object_63')targets.push(c)});
+ if(!targets.length)return 0;
+ o.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(o.matrixWorld).invert();
+ const norm=models.map(m=>{m.updateMatrixWorld(true);const b=new THREE.Box3().setFromObject(m),sz=b.getSize(new THREE.Vector3()),c=b.getCenter(new THREE.Vector3());
+  return{m,b,c,L:Math.max(sz.x,sz.z)||1,rot:sz.z>sz.x?Math.PI/2:0}}); // chaque modèle est remis avec son grand côté sur X, centré, calé par le haut
+ let count=0;const add=[];
+ targets.forEach(mesh=>{
+  const g=mesh.geometry,pa=g.attributes.position,ix=g.index,nv=pa.count,v=new THREE.Vector3();
+  const key=new Map(),par=[],P=[],id=new Int32Array(nv);
+  const f=i=>{while(par[i]!==i){par[i]=par[par[i]];i=par[i]}return i};
+  for(let i=0;i<nv;i++){v.fromBufferAttribute(pa,i).applyMatrix4(mesh.matrixWorld).applyMatrix4(inv);
+   const k=Math.round(v.x*50)+','+Math.round(v.y*50)+','+Math.round(v.z*50);let u=key.get(k);
+   if(u===undefined){u=par.length;par.push(u);key.set(k,u);P.push(v.x,v.y,v.z)}id[i]=u}
+  const nt=(ix?ix.count:nv)/3;
+  for(let t=0;t<nt;t++){const a=id[ix?ix.getX(t*3):t*3],b=id[ix?ix.getX(t*3+1):t*3+1],c=id[ix?ix.getX(t*3+2):t*3+2];
+   const ra=f(a),rb=f(b),rc2=f(c);par[rb]=ra;par[f(rc2)]=ra}
+  const isl=new Map();
+  for(let u=0;u<par.length;u++){const r=f(u);let e=isl.get(r);if(!e){e={x0:1e9,x1:-1e9,z0:1e9,z1:-1e9,y1:-1e9};isl.set(r,e)}
+   const x=P[u*3],y=P[u*3+1],z=P[u*3+2];if(x<e.x0)e.x0=x;if(x>e.x1)e.x1=x;if(z<e.z0)e.z0=z;if(z>e.z1)e.z1=z;if(y>e.y1)e.y1=y}
+  isl.forEach(e=>{const w=e.x1-e.x0,d=e.z1-e.z0;if(Math.max(w,d)<.8)return; // miettes ignorées
+   const alongZ=d>w,L=alongZ?d:w,cx=(e.x0+e.x1)/2,cz=(e.z0+e.z1)/2,nm=norm[count%norm.length];count++;
+   const nseg=Math.max(1,Math.ceil(L/(nm.L*3))),seg=L/nseg,sc=seg/nm.L;
+   for(let k=0;k<nseg;k++){const off=-L/2+seg*(k+.5);
+    const mod=nm.m.clone(true);mod.position.set(-nm.c.x,-nm.b.max.y,-nm.c.z);
+    const pv=new THREE.Group();pv.add(mod);pv.rotation.y=nm.rot;
+    const gr=new THREE.Group();gr.add(pv);gr.scale.setScalar(sc);gr.rotation.y=alongZ?Math.PI/2:0;
+    gr.position.set(alongZ?cx:cx+off,e.y1,alongZ?cz-off:cz);add.push(gr)}});
+  if(mesh.parent){g.dispose();mesh.parent.remove(mesh)}});
+ add.forEach(a=>o.add(a));console.log('[auvents]',count,'auvents remplacés');return count}
+function start(o,awn){
  clean(o);o.updateMatrixWorld(true);
  let bx=new THREE.Box3().setFromObject(o);const c=bx.getCenter(new THREE.Vector3());
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;o.updateMatrixWorld(true);
@@ -806,6 +841,7 @@ function start(o){
  // Objets supprimés définitivement (par nom exact) : retirés du modèle AVANT la création des 3x3 tuiles, donc partout
  const ND=(()=>{const del=[];o.traverse(c=>{if(c.isMesh&&(KILL.includes(c.name)||KILLRE.test(c.name||'')))del.push(c)});
   del.forEach(c=>{if(c.geometry)c.geometry.dispose();c.parent&&c.parent.remove(c)});return del.length})();
+  const NAW=placeAwnings(o,awn);
  const NS=retexSidewalk(o,sz,s0*uf); const NA=retexAsphalt(o,s0*uf); // goudron : texture + sol mouillé // nouvelle texture béton sur les trottoirs (avant la création des tuiles : partagée partout)
  const NP=pruneDead(o); // objets invisibles (cachés, matériau invisible) et groupes vides laissés par les suppressions
  const NT=hideTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
@@ -822,9 +858,9 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length;
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW;
  setTimeout(()=>msg.style.opacity=0,7000)}
-tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>start(g.scene),u=>{msg.textContent='Erreur de chargement : '+u},
+tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>loadAwnings(a=>start(g.scene,a)),u=>{msg.textContent='Erreur de chargement : '+u},
  e=>{if(e.total)msg.textContent='Chargement New York '+Math.round(e.loaded/e.total*100)+'%'});
 
 // ===== Système d'intérieurs (appartements) : branché sur le joueur P, la caméra et le chargeur GLB existants =====
