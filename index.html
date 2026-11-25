@@ -191,7 +191,7 @@ const WINGLSL='if(uMode>0.5&&uWin>0.002){'+
  'float wl=1.0-smoothstep(0.3,0.6,abs(normalize(vWN).y));'+                      // seulement les murs verticaux
  'float cov=1.0,id=0.5,lx=0.5,ly=0.5;bool got=false;\n'+
  '#ifdef USE_MAP\n'+
- 'if(uMode<1.5){vec4 wm=texture2D(uWinTex,vUv);cov=wm.a;id=fract(wm.r+0.618*h31(vOrg*0.173+1.7));lx=wm.g;ly=wm.b;got=true;}\n'+  // décalage par objet : deux immeubles identiques ne s\'allument pas pareil
+ 'if(uMode<1.5){vec4 wm=texture2D(uWinTex,vUv);if(wm.a>0.5){cov=wm.a;id=fract(wm.r+0.618*h31(vOrg*0.173+1.7));lx=wm.g;ly=wm.b;got=true;}}\n'+  // vitre trouvée par la carte ; sinon, repli ci-dessous sur les zones sombres  // décalage par objet : deux immeubles identiques ne s\'allument pas pareil
  '#endif\n'+
  'if(!got){vec3 cs=vec3(3.2,3.4,3.2);vec3 cl=floor(vWP/cs);vec3 fr=fract(vWP/cs);id=h31(cl);lx=0.5*(fr.x+fr.z);ly=fr.y;'+
  'float lum=dot(diffuseColor.rgb,vec3(0.2126,0.7152,0.0722));cov=(uMode>2.5)?1.0:1.0-smoothstep(0.02,0.08,lum);}'+
@@ -258,7 +258,7 @@ const LAMPS=[],LAMPRE=/lamp|lantern|luminair|street_?light|light_?pole|lampadair
 let haloMat=null,poolMat=null,lampCol=null,poolIm=null,LAMPB=new Float32Array(0),LAMPTH=LAMPB,LAMPPH=LAMPB,_lampAny=false;
 // Carte de lumière : vue du dessus de toute la ville (1 texture). Chaque lampadaire allumé y dessine sa tache ; les matériaux de la ville la lisent (sol, routes, façades, voitures)
 // → tous les lampadaires éclairent leur environnement en même temps, pour le prix d'UNE lecture de texture (pas de PointLight, rien ne suit le joueur).
-const LAMP_R=11,CROSS_R=20,LAMPLM=IS_MOBILE?512:768; // rayon d'éclairage (m) · résolution de la carte
+const LAMP_R=11,CROSS_R=26,LAMPLM=IS_MOBILE?512:768; // rayon d'éclairage (m) · résolution de la carte
 const LAMPSPR=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const g=c.getContext('2d'),gr=g.createRadialGradient(64,64,0,64,64,64);
  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.3,'rgba(255,255,255,.7)');gr.addColorStop(.62,'rgba(255,255,255,.26)');gr.addColorStop(.85,'rgba(255,255,255,.05)');gr.addColorStop(1,'rgba(255,255,255,0)');
  g.fillStyle=gr;g.fillRect(0,0,128,128);return c})();
@@ -305,7 +305,7 @@ function patchLampLight(){const seen=new Set();let n=0;
 function bakeLampMap(){if(!LAMPCV||!MAP)return;
  const g=LAMPCV.getContext('2d'),W=LAMPLM,k=W/(MAP.cell*N),sp=2*LAMP_R*k;
  g.globalCompositeOperation='source-over';g.globalAlpha=1;g.fillStyle='#000';g.fillRect(0,0,W,W);g.globalCompositeOperation='lighter';
- for(let i=0;i<LAMPS.length;i++){const q=LAMPQ[i];if(!q)continue;const p=LAMPS[i];const s2=p.nh?sp*CROSS_R/LAMP_R:sp;g.globalAlpha=q/16;g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2)}
+ for(let i=0;i<LAMPS.length;i++){const q=LAMPQ[i];if(!q)continue;const p=LAMPS[i];const s2=p.nh?sp*CROSS_R/LAMP_R:sp;g.globalAlpha=q/16;g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2);if(p.nh)g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2)} // carrefour : 2 passes = zone très éclairée plus large
  g.globalAlpha=1;LAMPTEX.needsUpdate=true}
 function isLampMesh(c){if(LAMPNAMES.has(c.name)||LAMPRE.test(c.name||''))return true;
  for(const m of [].concat(c.material))if(m&&m.name&&LAMPRE.test(m.name))return true;
@@ -419,10 +419,11 @@ function restoreTrees(e){if(TDEAD)return false;TDEAD=true;let n=0;
  if(wrap)wrap.traverse(c=>{if(c.isMesh){const ms=[].concat(c.material);if(ms.length&&ms.every(m=>m&&TREE_MAT.test(m.name||''))){c.visible=true;n++}}});
  if(!n)return false;setTimeout(()=>{if(MAP&&wrap)buildMap()},100);msg.style.opacity=1;msg.textContent='Suppression des arbres annulée (erreur : '+((e&&e.message)||e)+')';return true}
 const TREE_MAT=/^(FoliageTrees|CityGenBark)/i;
-function pruneDead(o){let n=0;const dead=[];
+function pruneDead(o){let n=0;const dead=[];loadTags();
+ const lampy=c=>{let f=false;c.traverse(x=>{if(!f&&x.isMesh&&isLampMesh(x))f=true});return f}; // les pièces de lampadaire (même à matériau invisible) servent à repérer les lampes : on les garde
  o.traverse(c=>{if(c===o)return;
-  if(c.visible===false)dead.push(c);
-  else if(c.isMesh){const ms=[].concat(c.material);if(ms.length&&ms.every(m=>!m||m.visible===false||m.colorWrite===false))dead.push(c)}});
+  if(c.visible===false){if(!lampy(c))dead.push(c)}
+  else if(c.isMesh){const ms=[].concat(c.material);if(ms.length&&ms.every(m=>!m||m.visible===false||m.colorWrite===false)&&!isLampMesh(c))dead.push(c)}});
  dead.forEach(c=>{if(c.parent){c.traverse(x=>{if(x.geometry)x.geometry.dispose()});c.parent.remove(c);n++}});
  for(let again=true;again;){again=false;const e=[];o.traverse(c=>{if(c!==o&&!c.isMesh&&!c.isLight&&!c.isCamera&&c.children.length===0)e.push(c)});
   e.forEach(c=>{if(c.parent){c.parent.remove(c);n++;again=true}})}
@@ -452,7 +453,8 @@ function animate(h,dt,spd){const u=h.userData;u.ph+=dt*(3+spd*1.6);const a=Math.
 function turnTo(cur,tgt,k){let d=tgt-cur;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return cur+d*Math.min(1,k)}
 
 // ===== Ville : new_york_city.glb répété en 3x3 (miroirs = routes qui se raccordent) =====
-const TARGET=350,TILES=3; // largeur d'un bloc en mètres (échelle validée) et nombre de blocs par côté
+const TARGET=350,TILES=3,EXTRA=[[2,0]]; // EXTRA = blocs ajoutés en plus du 3x3 : [colonne, ligne] par rapport au bloc central [0,0] (ex. [[2,0],[2,1]] pour en ajouter deux)
+let TX=TILES,TZ=TILES; // largeur d'un bloc en mètres (échelle validée) et nombre de blocs par côté
 let box0=null,s0=1,uf=1,MAP=null,selBox=null;
 try{uf=parseFloat(localStorage.getItem('ny_scale'))||1}catch(e){}
 const SH=11,N=1<<SH,NN=N*N;
@@ -545,7 +547,7 @@ let HN=0;
 // Carte des hauteurs (sol, collisions, caméra)
 function buildMap(){
  const s=s0*uf;wrap.scale.setScalar(s);wrap.updateMatrixWorld(true);
- const W=box0.x*TILES*s,D=box0.z*TILES*s,sy=box0.y*s,S=Math.max(W,D)+4,half=S/2;
+ const W=box0.x*TX*s,D=box0.z*TZ*s,sy=box0.y*s,S=Math.max(W,D)+4,half=S/2;
  hmat.uniforms.uMin.value=0;hmat.uniforms.uRange.value=sy+2;
  ortho.left=-half;ortho.right=half;ortho.top=half;ortho.bottom=-half;ortho.near=.1;ortho.far=sy+30;ortho.updateProjectionMatrix();
  ortho.position.set(0,sy+10,0);ortho.up.set(0,0,-1);ortho.lookAt(0,0,0);ortho.updateMatrixWorld(true);
@@ -565,6 +567,8 @@ function buildMap(){
  const TALL=g+2,OB=TMP;let wc=0;
  for(let k=0;k<NN;k++)OB[k]=(has[k]&&H[k]>TALL)?1:0;
  openMask(OB,3);
+ // auvents, parasols, enseignes en saillie : volumes minces (< ~6 m) collés aux façades, situés en hauteur → on peut marcher dessous. Les vrais bâtiments (épais) restent des obstacles.
+ {const B=new Uint8Array(OB),ar=Math.max(3,Math.round(3.2/cell));openMask(B,ar);for(let k=0;k<NN;k++)if(OB[k]&&!B[k])OB[k]=0}
  if(!TOPS)TOPS=new Float32Array(NN);const GHt=TOPS;
  for(let k=0;k<NN;k++){
   if(!has[k]){GHt[k]=g;walk[k]=1;wc++;continue}
@@ -572,6 +576,8 @@ function buildMap(){
   if(OB[k]){GHt[k]=g;walk[k]=0;continue}
   if(h<g-1.5){GHt[k]=g;walk[k]=0;continue}
   GHt[k]=(Math.abs(h-g)<=.7)?h:g;walk[k]=1;wc++}
+ // la carte est carrée mais la ville ne l'est plus forcément : en dehors des blocs, on ne marche pas
+ {const hx=W/2,hz=D/2;for(let j=0;j<N;j++){const z=half-(j+.5)*cell,rowOut=Math.abs(z)>hz;for(let i=0;i<N;i++){const x=-half+(i+.5)*cell;if(rowOut||Math.abs(x)>hx)walk[j*N+i]=0}}}
  // Cellules "sûres" (1 m de marge) pour faire apparaître le joueur et les PNJ
  TMP.fill(0);SAFE.fill(0);
  for(let j=0;j<N;j++){const row=j*N;for(let i=2;i<N-2;i++)TMP[row+i]=walk[row+i-2]&walk[row+i-1]&walk[row+i]&walk[row+i+1]&walk[row+i+2]}
@@ -698,9 +704,12 @@ function start(o){
  const NP=pruneDead(o); // objets invisibles (cachés, matériau invisible) et groupes vides laissés par les suppressions
  const NT=hideTrees(o);const info=makeSlots(o,sz);lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
- for(let i=0;i<TILES;i++)for(let j=0;j<TILES;j++){const tg=new THREE.Group();
-  tg.position.set((i-cc)*sz.x,0,(j-cc)*sz.z);tg.scale.set(Math.abs(i-cc)%2?-1:1,1,Math.abs(j-cc)%2?-1:1);
-  if(i===cc&&j===cc)tg.add(o);else fillTile(tg,o,info);wrap.add(tg)}
+ const TL=[];for(let i=-cc;i<=cc;i++)for(let j=-cc;j<=cc;j++)TL.push([i,j]);EXTRA.forEach(e=>TL.push(e));
+ const mi=Math.min(...TL.map(t=>t[0])),Mi=Math.max(...TL.map(t=>t[0])),mj=Math.min(...TL.map(t=>t[1])),Mj=Math.max(...TL.map(t=>t[1]));
+ TX=Mi-mi+1;TZ=Mj-mj+1;const ci=(mi+Mi)/2,cj=(mj+Mj)/2; // ville recentrée sur l'origine
+ for(const[i,j]of TL){const tg=new THREE.Group();
+  tg.position.set((i-ci)*sz.x,0,(j-cj)*sz.z);tg.scale.set(Math.abs(i)%2?-1:1,1,Math.abs(j)%2?-1:1); // miroirs alternés : les routes se raccordent
+  if(i===0&&j===0)tg.add(o);else fillTile(tg,o,info);wrap.add(tg)}
  outerG=new THREE.Group();const R=cc+RING;
  for(let i=-R;i<=R;i++)for(let j=-R;j<=R;j++){if(Math.abs(i)<=cc&&Math.abs(j)<=cc)continue;
   const tg=new THREE.Group();tg.position.set(i*sz.x,0,j*sz.z);tg.scale.set(Math.abs(i)%2?-1:1,1,Math.abs(j)%2?-1:1);
