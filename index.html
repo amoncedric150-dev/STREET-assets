@@ -1157,7 +1157,7 @@ function placeLamps(o,L,mpu){
  grp.userData.lampPts=lampPts;grp.userData.noLamp=true;o.add(grp);console.log('[lampadaires] posés',L.length,'par modèle',groups.map(g=>g.length),'sommets',tot);return L.length}
 
 // ===== Lampadaires en plus : le long des bordures de trottoir, là où il n'y avait pas d'ancien lampadaire =====
-const LAMP_FILL=true,LAMP_SP=40,LAMP_H=7.5; // espacement entre lampadaires (m) · distance mini à un ancien lampadaire (m) · hauteur (m)
+let LAMPDIAG='';const LAMP_FILL=true,LAMP_SP=40,LAMP_H=7.5; // espacement entre lampadaires (m) · distance mini à un ancien lampadaire (m) · hauteur (m)
 function fillLamps(o,have,mpu){
  if(!LAMP_FILL)return [];
  o.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(o.matrixWorld).invert(),m=new THREE.Matrix4(),v=new THREE.Vector3(),road=[],walk=[];
@@ -1171,29 +1171,29 @@ function fillLamps(o,have,mpu){
  const cell=Math.max(x1-x0,z1-z0)/700,Dx=Math.ceil((x1-x0)/cell)+1,Dz=Math.ceil((z1-z0)/cell)+1,n=Dx*Dz;
  const G={Dx,Dz,cell,x0,z0},R=new Uint8Array(n),Y=new Float32Array(n),S=new Uint8Array(n),YS=new Float32Array(n);
  TR.forEach(a=>MK_raster(a,G,R,Y));TW.forEach(a=>MK_raster(a,G,S,YS));
- const cm=cell*mpu,rr=Math.max(2,Math.round(1.1/cm)),dMin=.45/cm,dMax=1.1/cm,SP=LAMP_SP/mpu,out=[],per=6/cm,inb=.7/cm;
+ const cm=cell*mpu,rr=Math.max(2,Math.round(1.1/cm)),dMin=.45/cm,dMax=1.1/cm,SP=LAMP_SP/mpu,out=[],per=3/cm,inb=.7/cm,DG={cand:0,droit:0,traverse:0,large:0,libre:0};
  const cs=SP,grid=new Map(),key=(a,b)=>(a+8192)*16384+(b+8192),add=p=>{const k=key(Math.floor(p.x/cs),Math.floor(p.z/cs)),l=grid.get(k);if(l)l.push(p);else grid.set(k,[p])};
  const far=(x,z)=>{const ci=Math.floor(x/cs),cj=Math.floor(z/cs);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=grid.get(key(ci+a,cj+b));if(l)for(const p of l){const ex=p.x-x,ez=p.z-z;if(ex*ex+ez*ez<SP*SP)return false}}return true};
  const isW=(i,j)=>i>=0&&j>=0&&i<Dx&&j<Dz&&S[j*Dx+i]&&!R[j*Dx+i];
  for(let j=rr;j<Dz-rr;j++)for(let i=rr;i<Dx-rr;i++){const k=j*Dx+i;if(!S[k]||R[k])continue;
   let sx=0,sz=0,c=0,dm=1e9;
   for(let b=-rr;b<=rr;b++)for(let a=-rr;a<=rr;a++){if(R[(j+b)*Dx+i+a]){sx+=a;sz+=b;c++;const d=Math.hypot(a,b);if(d<dm)dm=d}}
-  if(!c||dm<dMin||dm>dMax)continue;
+  if(!c||dm<dMin||dm>dMax)continue;DG.cand++;
   const l=Math.hypot(sx,sz)||1,dx=sx/l,dz=sz/l,px=-dz,pz=dx;
   // bordure droite : le trottoir continue 6 m de chaque côté (pas de coin de carrefour)
-  if(!isW(Math.round(i+px*per),Math.round(j+pz*per))||!isW(Math.round(i-px*per),Math.round(j-pz*per)))continue;
+  if(!isW(Math.round(i+px*per),Math.round(j+pz*per))&&!isW(Math.round(i-px*per),Math.round(j-pz*per)))continue;DG.droit++;
   const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;if(!far(x,z))continue;
   // traverse la rue en ligne droite jusqu'au trottoir d'en face : c'est la rue « principale » si elle fait 8 à 45 m de large
   let t=1,onRoad=false,oi=-1,oj=-1;
-  for(;t<46/cm;t++){const ii=Math.round(i+dx*t),jj=Math.round(j+dz*t);if(ii<0||jj<0||ii>=Dx||jj>=Dz)break;const q=jj*Dx+ii;if(R[q])onRoad=true;else if(onRoad){if(S[q]){oi=ii;oj=jj}break}}
-  const wm=t*cm;if(oi<0||wm<8||wm>45)continue;
+  let gap=0;for(;t<46/cm;t++){const ii=Math.round(i+dx*t),jj=Math.round(j+dz*t);if(ii<0||jj<0||ii>=Dx||jj>=Dz)break;const q=jj*Dx+ii;if(R[q]){onRoad=true;gap=0}else if(onRoad){if(S[q]){oi=ii;oj=jj;break}if(++gap>2.5/cm)break}} // la bordure entre route et trottoir n'est ni l'un ni l'autre : on la saute
+  if(oi<0)continue;DG.traverse++;const wm=t*cm;if(wm<8||wm>45)continue;DG.large++;
   const fi=Math.round(oi+dx*inb),fj=Math.round(oj+dz*inb),ok2=isW(fi,fj),qi=ok2?fi:oi,qj=ok2?fj:oj;
-  if(!isW(Math.round(qi+px*per),Math.round(qj+pz*per))||!isW(Math.round(qi-px*per),Math.round(qj-pz*per)))continue;
-  const x2=x0+(qi+.5)*cell,z2=z0+(qj+.5)*cell;if(!far(x2,z2))continue;
+  if(!isW(Math.round(qi+px*per),Math.round(qj+pz*per))&&!isW(Math.round(qi-px*per),Math.round(qj-pz*per)))continue;
+  const x2=x0+(qi+.5)*cell,z2=z0+(qj+.5)*cell;if(!far(x2,z2))continue;DG.libre++;
   const a=1/mpu;
   out.push({x,z,y:YS[k],hm:LAMP_H,ax:dx*a,az:dz*a},{x:x2,z:z2,y:YS[qj*Dx+qi],hm:LAMP_H,ax:-dx*a,az:-dz*a});add({x,z});add({x:x2,z:z2});
   if(out.length>800)return out}
- console.log('[lampadaires] ajoutés (paires face à face) :',out.length);return out}
+ LAMPDIAG=' [bordures '+DG.cand+' · droites '+DG.droit+' · traversée '+DG.traverse+' · rue 8-45 m '+DG.large+' · paires '+DG.libre+']';console.log('[lampadaires]',LAMPDIAG);return out}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
  o.updateMatrixWorld(true);
@@ -1294,7 +1294,7 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés)';
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés)'+LAMPDIAG;
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);loadLampModels().then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
