@@ -1122,13 +1122,17 @@ function collectLamps(o,mpu){
 function placeLamps(o,L,mpu){
  const mods=[];
  LAMPGLB.forEach((sc,idx)=>{if(!sc)return;sc.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(sc.matrixWorld).invert(),subs=[],v=new THREE.Vector3(),bb=new THREE.Box3();
-  sc.traverse(c=>{if(c.isMesh&&c.geometry&&c.geometry.attributes.position)subs.push({g:c.geometry,mat:c.material,M:new THREE.Matrix4().copy(c.matrixWorld).premultiply(inv)})});
+  sc.traverse(c=>{if(c.isMesh&&c.geometry&&c.geometry.attributes.position)subs.push({g:c.geometry,mat:c.material,nm:(c.name||'')+' '+([].concat(c.material)[0]||{}).name,M:new THREE.Matrix4().copy(c.matrixWorld).premultiply(inv)})});
   if(!subs.length)return;
   const pts=[];subs.forEach(s=>{const pa=s.g.attributes.position;for(let i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(s.M);pts.push([v.x,v.y,v.z]);bb.expandByPoint(v)}});
   const mn=bb.min.y,H=bb.max.y-mn;if(!(H>0))return;
   const avg=(a,b)=>{let x=0,z=0,n=0;for(const p of pts)if(p[1]>=mn+a*H&&p[1]<=mn+b*H){x+=p[0];z+=p[2];n++}return n?[x/n,z/n]:null};
-  const sh=avg(.2,.5)||[0,0],tp=avg(.85,1),ex=tp?tp[0]-sh[0]:0,ez=tp?tp[1]-sh[1]:0,arm=Math.hypot(ex,ez)>.03*H;
-  mods.push({sc,subs,mn,H,px:sh[0],pz:sh[1],ang:arm?Math.atan2(ex,ez):null,bx:tp?tp[0]:sh[0],bz:tp?tp[1]:sh[1],by:bb.max.y-.04*H});console.log('[lampadaire GLB '+idx+'] hauteur',H.toFixed(2),'bras',arm?'oui':'non')});
+  const sh=avg(.2,.5)||[0,0];
+  // ampoule = centre du sous-objet « light / bulb / glass / foregrou » (sinon : haut du modèle)
+  let bl=null;const bb2=new THREE.Box3();subs.forEach(s2=>{if(!/light|bulb|foregrou|glass|lamp_?glass/i.test(s2.nm))return;const pa=s2.g.attributes.position;for(let i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(s2.M);bb2.expandByPoint(v)}});
+  if(!bb2.isEmpty())bl=bb2.getCenter(new THREE.Vector3());
+  const tp=bl?[bl.x,bl.z]:avg(.85,1),ex=tp?tp[0]-sh[0]:0,ez=tp?tp[1]-sh[1]:0,arm=Math.hypot(ex,ez)>.03*H;
+  mods.push({sc,subs,mn,H,px:sh[0],pz:sh[1],ang:arm?Math.atan2(ex,ez):null,bx:tp?tp[0]:sh[0],bz:tp?tp[1]:sh[1],by:bl?bl.y:bb.max.y-.04*H});console.log('[lampadaire GLB '+idx+'] hauteur',H.toFixed(2),'bras',arm?'oui':'non')});
  if(!mods.length||!L.length)return 0;
  // 1 emplacement = 1 seul modèle (tirage fixe par position, jamais deux modèles au même endroit)
  const pick=p=>{let h=Math.imul(Math.round(p.x*1000)^0x9e3779b1,0x85ebca6b)^Math.imul(Math.round(p.z*1000)^0x51ed270b,0xc2b2ae35);h^=h>>>13;h=Math.imul(h,0x27d4eb2f);h^=h>>>15;return (h>>>0)};
@@ -1153,7 +1157,7 @@ function placeLamps(o,L,mpu){
  grp.userData.lampPts=lampPts;grp.userData.noLamp=true;o.add(grp);console.log('[lampadaires] posés',L.length,'par modèle',groups.map(g=>g.length),'sommets',tot);return L.length}
 
 // ===== Lampadaires en plus : le long des bordures de trottoir, là où il n'y avait pas d'ancien lampadaire =====
-const LAMP_FILL=true,LAMP_SP=26,LAMP_KEEP=13,LAMP_H=7.5; // espacement entre lampadaires (m) · distance mini à un ancien lampadaire (m) · hauteur (m)
+const LAMP_FILL=true,LAMP_SP=40,LAMP_H=7.5; // espacement entre lampadaires (m) · distance mini à un ancien lampadaire (m) · hauteur (m)
 function fillLamps(o,have,mpu){
  if(!LAMP_FILL)return [];
  o.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(o.matrixWorld).invert(),m=new THREE.Matrix4(),v=new THREE.Vector3(),road=[],walk=[];
@@ -1167,20 +1171,29 @@ function fillLamps(o,have,mpu){
  const cell=Math.max(x1-x0,z1-z0)/700,Dx=Math.ceil((x1-x0)/cell)+1,Dz=Math.ceil((z1-z0)/cell)+1,n=Dx*Dz;
  const G={Dx,Dz,cell,x0,z0},R=new Uint8Array(n),Y=new Float32Array(n),S=new Uint8Array(n),YS=new Float32Array(n);
  TR.forEach(a=>MK_raster(a,G,R,Y));TW.forEach(a=>MK_raster(a,G,S,YS));
- const cm=cell*mpu,rr=Math.max(2,Math.round(1.1/cm)),dMin=.45/cm,dMax=1.1/cm,SP=LAMP_SP/mpu,KP=LAMP_KEEP/mpu,out=[];
+ const cm=cell*mpu,rr=Math.max(2,Math.round(1.1/cm)),dMin=.45/cm,dMax=1.1/cm,SP=LAMP_SP/mpu,out=[],per=6/cm,inb=.7/cm;
  const cs=SP,grid=new Map(),key=(a,b)=>(a+8192)*16384+(b+8192),add=p=>{const k=key(Math.floor(p.x/cs),Math.floor(p.z/cs)),l=grid.get(k);if(l)l.push(p);else grid.set(k,[p])};
- const far=(x,z,r)=>{const ci=Math.floor(x/cs),cj=Math.floor(z/cs);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=grid.get(key(ci+a,cj+b));if(l)for(const p of l){const ex=p.x-x,ez=p.z-z;if(ex*ex+ez*ez<(p.keep?KP:r)*(p.keep?KP:r))return false}}return true};
- have.forEach(p=>add({x:p.x,z:p.z,keep:true}));
+ const far=(x,z)=>{const ci=Math.floor(x/cs),cj=Math.floor(z/cs);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=grid.get(key(ci+a,cj+b));if(l)for(const p of l){const ex=p.x-x,ez=p.z-z;if(ex*ex+ez*ez<SP*SP)return false}}return true};
+ const isW=(i,j)=>i>=0&&j>=0&&i<Dx&&j<Dz&&S[j*Dx+i]&&!R[j*Dx+i];
  for(let j=rr;j<Dz-rr;j++)for(let i=rr;i<Dx-rr;i++){const k=j*Dx+i;if(!S[k]||R[k])continue;
   let sx=0,sz=0,c=0,dm=1e9;
   for(let b=-rr;b<=rr;b++)for(let a=-rr;a<=rr;a++){if(R[(j+b)*Dx+i+a]){sx+=a;sz+=b;c++;const d=Math.hypot(a,b);if(d<dm)dm=d}}
   if(!c||dm<dMin||dm>dMax)continue;
-  const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;
-  if(!far(x,z,SP))continue;
-  const l=Math.hypot(sx,sz)||1,p={x,z,y:YS[k],hm:LAMP_H,ax:sx/l/ mpu,az:sz/l/mpu};
-  out.push(p);add({x,z});
-  if(out.length>400)return out}
- console.log('[lampadaires] ajoutés le long des trottoirs :',out.length);return out}
+  const l=Math.hypot(sx,sz)||1,dx=sx/l,dz=sz/l,px=-dz,pz=dx;
+  // bordure droite : le trottoir continue 6 m de chaque côté (pas de coin de carrefour)
+  if(!isW(Math.round(i+px*per),Math.round(j+pz*per))||!isW(Math.round(i-px*per),Math.round(j-pz*per)))continue;
+  const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;if(!far(x,z))continue;
+  // traverse la rue en ligne droite jusqu'au trottoir d'en face : c'est la rue « principale » si elle fait 8 à 45 m de large
+  let t=1,onRoad=false,oi=-1,oj=-1;
+  for(;t<46/cm;t++){const ii=Math.round(i+dx*t),jj=Math.round(j+dz*t);if(ii<0||jj<0||ii>=Dx||jj>=Dz)break;const q=jj*Dx+ii;if(R[q])onRoad=true;else if(onRoad){if(S[q]){oi=ii;oj=jj}break}}
+  const wm=t*cm;if(oi<0||wm<8||wm>45)continue;
+  const fi=Math.round(oi+dx*inb),fj=Math.round(oj+dz*inb),ok2=isW(fi,fj),qi=ok2?fi:oi,qj=ok2?fj:oj;
+  if(!isW(Math.round(qi+px*per),Math.round(qj+pz*per))||!isW(Math.round(qi-px*per),Math.round(qj-pz*per)))continue;
+  const x2=x0+(qi+.5)*cell,z2=z0+(qj+.5)*cell;if(!far(x2,z2))continue;
+  const a=1/mpu;
+  out.push({x,z,y:YS[k],hm:LAMP_H,ax:dx*a,az:dz*a},{x:x2,z:z2,y:YS[qj*Dx+qi],hm:LAMP_H,ax:-dx*a,az:-dz*a});add({x,z});add({x:x2,z:z2});
+  if(out.length>800)return out}
+ console.log('[lampadaires] ajoutés (paires face à face) :',out.length);return out}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
  o.updateMatrixWorld(true);
@@ -1261,7 +1274,7 @@ function start(o){
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
  // Objets supprimés définitivement (par nom exact) : retirés du modèle AVANT la création des 3x3 tuiles, donc partout
  let LPOS=[];try{LPOS=collectLamps(o,s0*uf)}catch(e){console.warn('Lampadaires',e)}
- let NFILL=0;try{const E=fillLamps(o,LPOS,s0*uf);NFILL=E.length;LPOS=LPOS.concat(E)}catch(e){console.warn('Remplissage lampadaires',e)}
+ let NFILL=0;try{const E=fillLamps(o,[],s0*uf);NFILL=E.length;LPOS=E}catch(e){console.warn('Remplissage lampadaires',e)}
  const ND=(()=>{const del=[];o.traverse(c=>{if(c.isMesh&&(KILL.includes(c.name)||KILLRE.test(c.name||'')||(()=>{const ms=[].concat(c.material).filter(Boolean);return false})()))del.push(c)});
   del.forEach(c=>{if(c.geometry)c.geometry.dispose();c.parent&&c.parent.remove(c)});return del.length})();
   const AW=planAwnings(o,s0*uf);
