@@ -299,7 +299,7 @@ const LAMPGLSL='float ld=distance(vLP,cameraPosition);if(uLampOn>0.002&&ld<uLamp
  'float up=smoothstep(0.45,0.85,normalize(vLN).y);'+                       // sol / trottoir = plein · murs des bâtiments (rez-de-chaussée compris) = AUCUNE lumière
  'totalEmissiveRadiance+=(diffuseColor.rgb*0.8+vec3(0.07))*uLampCol*(ll*hh*up*uLampOn*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
 // Lueur des fenêtres : les bâtiments éclairés projettent une lumière chaude et douce sur la rue, les carrefours et les façades voisines (carte du dessus floutée, calculée une fois)
-const GLOWAMP=1.6; // intensité de la lueur (baisse si trop forte)
+const GLOWAMP=0.9; // intensité de la lueur générale de nuit sur la ville (avant : 1.6 = trop fort · baisse encore si besoin, 0 = aucune)
 let GLOWTEX=null;
 const GLOWGLSL='if(uGlowK>0.002&&ld<uLampFar){vec2 gq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
  'float gg=texture2D(uGlowMap,clamp(gq,0.0,1.0)).r*step(0.0,min(gq.x,gq.y))*step(max(gq.x,gq.y),1.0);'+
@@ -1422,6 +1422,35 @@ function placeHydrants(o,L,mpu){
  const n=bakeInstances(o,HYDGLB,pts,HYD_HM,HYD_ROT,'Bouches_GLB',HYD_MAX_VERTS,U);
  HYDDIAG+=' · GLB chargés '+HYDGLB.filter(Boolean).length+'/2'+(HYDERR.length?' (échec n°'+HYDERR.join(',')+')':'');console.log('[bouches d\'incendie]',HYDDIAG,'posées',n);return n}
 
+// ===== Feux tricolores : seulement quelques-uns, dispersés dans la ville (PAS à chaque carrefour), posés au coin du trottoir, tournés vers le carrefour =====
+const TL_URLS=['traffic_light.glb','traffic_light%202.glb'].map(n=>R2+'Trottoir/Feu%20tricolore/'+n);
+const TL_HM=[5.5,5.5];    // hauteur voulue (m) de chaque modèle (poteau compris) : change ici si un feu te paraît trop grand / petit
+const TL_ROT=[0,0];       // rotation de correction (radians) si un modèle ne regarde pas vers le carrefour (ex. Math.PI/2, Math.PI, -Math.PI/2)
+const TL_SP=110;          // distance mini (m) entre deux feux → plus grand = moins de feux
+const TL_KEEP=.4;         // part des coins de carrefour candidats (40 %) avant le tri par distance
+const TL_MAX_VERTS=600000;// garde-fou de sommets pour tous les feux
+let TLGLB=[null,null],TLDIAG='non exécuté',TLERR=[],TLPTS=[];
+function loadTrafficModels(){return Promise.all(TL_URLS.map((u,i)=>new Promise(res=>{try{binLoader.load(u,g=>{TLGLB[i]=g.scene;res()},undefined,e=>{TLERR.push(i+1);console.warn('Feu GLB '+(i+1)+' : échec de chargement',u,e);res()})}catch(e){TLERR.push(i+1);console.warn(e);res()}})))}
+function placeTrafficLights(o,L,mpu){
+ const C=LCTX;if(!C){TLDIAG='carte routes/trottoirs indisponible';return 0}
+ if(!TLGLB.some(Boolean)){TLDIAG='aucun GLB chargé (erreurs : '+(TLERR.join(',')||'?')+')';return 0}
+ const corners=BINCORNERS||[];if(!corners.length){TLDIAG='aucun coin de carrefour';return 0}
+ const U=1/mpu,ok=(x,z)=>{const i=Math.floor((x-C.x0)/C.cell),j=Math.floor((z-C.z0)/C.cell);if(i<0||j<0||i>=C.Dx||j>=C.Dz)return null;const k=j*C.Dx+i;return (C.S[k]&&!C.R[k])?C.YS[k]:null};
+ const hs=c=>{let h=Math.imul(Math.round(c.x*100)^0x1b873593,0x85ebca6b)^Math.imul(Math.round(c.z*100)^0x7f4a7c15,0xc2b2ae35);h^=h>>>13;h=Math.imul(h,0x27d4eb2f);h^=h>>>15;return h>>>0};
+ const cand=corners.map(c=>({c,h:hs(c)})).filter(e=>(e.h%1000)/1000<TL_KEEP).sort((a,b)=>a.h-b.h); // sélection pseudo-aléatoire STABLE (toujours les mêmes carrefours)
+ const free=(x,z,list,r)=>{for(const q of list||[])if((q.x-x)**2+(q.z-z)**2<(r*U)**2)return false;return true};
+ const pts=[],S2=(TL_SP*U)**2;let dist=0,occ=0;
+ for(const e of cand){const c=e.c,tx=-c.dz,tz=c.dx;let best=null;
+  for(const off of [0,1.6,-1.6,3.2,-3.2]){const x=c.x+c.dx*.6*U+tx*off*U,z=c.z+c.dz*.6*U+tz*off*U,y=ok(x,z);if(y==null)continue;
+   if(!free(x,z,L,2.5)||!free(x,z,BINPTS,1.6)||!free(x,z,HYDPTS,2))continue;best={x,z,y};break} // décalé le long du trottoir si un lampadaire / une poubelle / une bouche est déjà là
+  if(!best){occ++;continue}
+  let far=true;for(const q of pts)if((q.x-best.x)**2+(q.z-best.z)**2<S2){far=false;break}
+  if(!far){dist++;continue}
+  pts.push({x:best.x,z:best.z,y:best.y,rot:Math.atan2(-c.dx,-c.dz)})} // tourné vers le carrefour
+ TLPTS=pts;TLDIAG='coins '+corners.length+' · candidats '+cand.length+' · trop proches '+dist+' · occupés '+occ+' · feux '+pts.length+' · GLB chargés '+TLGLB.filter(Boolean).length+'/2'+(TLERR.length?' (échec n°'+TLERR.join(',')+')':'');
+ if(!pts.length)return 0;
+ const n=bakeInstances(o,TLGLB,pts,TL_HM,TL_ROT,'Feux_GLB',TL_MAX_VERTS,U,true);
+ console.log('[feux tricolores]',TLDIAG,'posés',n);return n}
 // ===== Bollards : rangées régulières au bord de la route, ENTRE deux lampadaires voisins (espacement identique, centré, comme à New York) =====
 const BOL_URL=R2+'Trottoir/Bollard/street_bollard.glb';
 const BOL_HM=[.95];          // hauteur (m) du bollard : change ici si trop grand / petit
@@ -1563,7 +1592,7 @@ function start(o){
   const AW=planAwnings(o,s0*uf);
  const NL=reskinLines(o,s0*uf); const NS=retexSidewalk(o,sz,s0*uf); const NA=retexAsphalt(o,s0*uf); // goudron : texture + sol mouillé // nouvelle texture béton sur les trottoirs (avant la création des tuiles : partagée partout)
  const NP=pruneDead(o); // objets invisibles (cachés, matériau invisible) et groupes vides laissés par les suppressions
- const NT=hideTrees(o);const info=makeSlots(o,sz);let NLP=0;try{NLP=placeLamps(o,LPOS,s0*uf)}catch(e){console.warn('Pose lampadaires',e)}let NBIN=0;try{NBIN=placeBins(o,LPOS,s0*uf)}catch(e){console.warn('Pose poubelles',e);BINDIAG='ERREUR : '+e.message}let NHYD=0;try{NHYD=placeHydrants(o,LPOS,s0*uf)}catch(e){console.warn('Pose bouches',e);HYDDIAG='ERREUR : '+e.message}let NBOL=0;try{NBOL=placeBollards(o,LPOS,s0*uf)}catch(e){console.warn('Pose bollards',e);BOLDIAG='ERREUR : '+e.message}const NAW=buildAwnings(o,AW,s0*uf);const NM=MK_ON?buildMarkings(o,sz,s0*uf):'désactivés (#sanslignes)';MK_DIAG=NM;lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
+ const NT=hideTrees(o);const info=makeSlots(o,sz);let NLP=0;try{NLP=placeLamps(o,LPOS,s0*uf)}catch(e){console.warn('Pose lampadaires',e)}let NBIN=0;try{NBIN=placeBins(o,LPOS,s0*uf)}catch(e){console.warn('Pose poubelles',e);BINDIAG='ERREUR : '+e.message}let NHYD=0;try{NHYD=placeHydrants(o,LPOS,s0*uf)}catch(e){console.warn('Pose bouches',e);HYDDIAG='ERREUR : '+e.message}let NTL=0;try{NTL=placeTrafficLights(o,LPOS,s0*uf)}catch(e){console.warn('Pose feux',e);TLDIAG='ERREUR : '+e.message}let NBOL=0;try{NBOL=placeBollards(o,LPOS,s0*uf)}catch(e){console.warn('Pose bollards',e);BOLDIAG='ERREUR : '+e.message}const NAW=buildAwnings(o,AW,s0*uf);const NM=MK_ON?buildMarkings(o,sz,s0*uf):'désactivés (#sanslignes)';MK_DIAG=NM;lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  const TL=[];for(let i=-cc;i<=cc;i++)for(let j=-cc;j<=cc;j++)TL.push([i,j]);EXTRA.forEach(e=>TL.push(e));
  const mi=Math.min(...TL.map(t=>t[0])),Mi=Math.max(...TL.map(t=>t[0])),mj=Math.min(...TL.map(t=>t[1])),Mj=Math.max(...TL.map(t=>t[1]));
@@ -1577,9 +1606,9 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'POUBELLES : '+NBIN+' posées (GLB '+(3-BINFB.length)+'/3'+(BINFB.length?', non chargés n°'+BINFB.join(','):'')+') · BOLLARDS : '+NBOL+' ['+BOLDIAG+'] · BOUCHES D\'INCENDIE : '+NHYD+' (GLB '+HYDGLB.filter(Boolean).length+'/2) — Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN+' ['+BINDIAG+' · GLB chargés '+(3-BINFB.length)+'/3'+(BINFB.length?' · non chargés n°'+BINFB.join(','):'')+'] · bouches d\'incendie : '+NHYD+' ['+HYDDIAG+']';
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'POUBELLES : '+NBIN+' posées (GLB '+(3-BINFB.length)+'/3'+(BINFB.length?', non chargés n°'+BINFB.join(','):'')+') · BOLLARDS : '+NBOL+' ['+BOLDIAG+'] · FEUX TRICOLORES : '+NTL+' ['+TLDIAG+'] · BOUCHES D\'INCENDIE : '+NHYD+' (GLB '+HYDGLB.filter(Boolean).length+'/2) — Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN+' ['+BINDIAG+' · GLB chargés '+(3-BINFB.length)+'/3'+(BINFB.length?' · non chargés n°'+BINFB.join(','):'')+'] · bouches d\'incendie : '+NHYD+' ['+HYDDIAG+']';
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,15000)}
-const PRELOAD=Promise.all([loadLampModels(),loadBinModels(),loadHydrantModels(),loadBollardModel()]); // téléchargés EN PARALLÈLE de la ville (avant : on attendait la ville, puis eux)
+const PRELOAD=Promise.all([loadLampModels(),loadBinModels(),loadHydrantModels(),loadTrafficModels(),loadBollardModel()]); // téléchargés EN PARALLÈLE de la ville (avant : on attendait la ville, puis eux)
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);Promise.race([PRELOAD,new Promise(res=>setTimeout(res,30000))]).then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
 
