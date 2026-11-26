@@ -25,6 +25,8 @@ button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;pad
 <div id="joy"><div id="knob"></div></div>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/DRACOLoader.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/libs/meshopt_decoder.js"></script>
 <script src="builder.js"></script>
 <script src="materials.js"></script>
 <script src="furniture.js"></script>
@@ -280,19 +282,19 @@ const LAMPSPR=(()=>{const c=document.createElement('canvas');c.width=c.height=12
  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.3,'rgba(255,255,255,.7)');gr.addColorStop(.62,'rgba(255,255,255,.26)');gr.addColorStop(.85,'rgba(255,255,255,.05)');gr.addColorStop(1,'rgba(255,255,255,0)');
  g.fillStyle=gr;g.fillRect(0,0,128,128);return c})();
 let LAMPCV=null,LAMPTEX=null,LAMPQ=new Uint8Array(0),_lampDirty=false,_lastBake=0;
-const LAMPU={uLampMap:{value:null},uLampP:{value:new THREE.Vector4(0,0,1,0)},uLampCol:{value:new THREE.Vector3(1.4,.84,.38)},uLampOn:{value:0},uGlowMap:{value:null},uGlowK:{value:0},uGlowCol:{value:new THREE.Vector3(1.0,.62,.30)},uLampFar:{value:900}};
+const LAMPU={uLampMap:{value:null},uLampP:{value:new THREE.Vector4(0,0,1,0)},uLampCol:{value:new THREE.Vector3(1.4,.84,.38)},uLampOn:{value:0},uGlowMap:{value:null},uGlowK:{value:0},uGlowCol:{value:new THREE.Vector3(1.0,.68,.36)},uLampFar:{value:900}};
 const LAMPGLSL='float ld=distance(vLP,cameraPosition);if(uLampOn>0.002&&ld<uLampFar){vec2 lq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
  'float ll=texture2D(uLampMap,clamp(lq,0.0,1.0)).r*step(0.0,min(lq.x,lq.y))*step(max(lq.x,lq.y),1.0);'+
  'float hh=1.0-smoothstep(1.5,9.0,vLP.y-uLampP.w);'+                       // la lumière retombe avec la hauteur (toits non éclairés)
  'float up=smoothstep(0.45,0.85,normalize(vLN).y);'+                       // sol / trottoir = plein · murs des bâtiments (rez-de-chaussée compris) = AUCUNE lumière
  'totalEmissiveRadiance+=diffuseColor.rgb*uLampCol*(ll*hh*up*uLampOn*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
 // Lueur des fenêtres : les bâtiments éclairés projettent une lumière chaude et douce sur la rue, les carrefours et les façades voisines (carte du dessus floutée, calculée une fois)
-const GLOWAMP=.55; // intensité de la lueur (baisse si trop forte)
+const GLOWAMP=1.25; // intensité de la lueur (baisse si trop forte)
 let GLOWTEX=null;
 const GLOWGLSL='if(uGlowK>0.002&&ld<uLampFar){vec2 gq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
  'float gg=texture2D(uGlowMap,clamp(gq,0.0,1.0)).r*step(0.0,min(gq.x,gq.y))*step(max(gq.x,gq.y),1.0);'+
  'float gh=1.0-smoothstep(2.0,16.0,vLP.y-uLampP.w);'+
- 'float gu=smoothstep(0.45,0.85,normalize(vLN).y);'+ // lueur : seulement sur le sol, jamais sur les murs
+ 'float gn=normalize(vLN).y;float gu=max(smoothstep(0.45,0.85,gn),0.45*(1.0-abs(gn)));'+ // lueur : seulement sur le sol, jamais sur les murs
  
  'totalEmissiveRadiance+=diffuseColor.rgb*uGlowCol*(gg*gh*gu*uGlowK*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
 function boxBlur(src,GN,r){const t=new Float32Array(src.length),o=new Float32Array(src.length),L=2*r+1;
@@ -306,8 +308,8 @@ function buildGlowMap(){const M=MAP;if(!M)return;
  for(let j=0;j<GN;j++)for(let i=0;i<GN;i++){let hit=0;
   for(let a=0;a<2;a++)for(let c=0;c<2;c++){const jj=Math.min(N-1,Math.floor((j+.25+.5*a)*f)),ii=Math.min(N-1,Math.floor((i+.25+.5*c)*f)),k=jj*N+ii;if(M.has[k]&&!M.walk[k]&&M.H[k]>M.g+8)hit++}
   b[j*GN+i]=hit/4}
- const rb=Math.max(1,Math.round(8/(M.cell*f)));for(let p=0;p<3;p++)b=boxBlur(b,GN,rb);
- const px=new Uint8Array(n*4);for(let i=0;i<n;i++){const v=Math.round(255*Math.min(1,b[i]*1.7));px[i*4]=px[i*4+1]=px[i*4+2]=v;px[i*4+3]=255}
+ const rb=Math.max(1,Math.round(14/(M.cell*f)));for(let p=0;p<3;p++)b=boxBlur(b,GN,rb);
+ const px=new Uint8Array(n*4);for(let i=0;i<n;i++){const v=Math.round(255*Math.min(1,b[i]*2.2));px[i*4]=px[i*4+1]=px[i*4+2]=v;px[i*4+3]=255}
  if(GLOWTEX)GLOWTEX.dispose();
  GLOWTEX=new THREE.DataTexture(px,GN,GN,THREE.RGBAFormat);GLOWTEX.flipY=false;GLOWTEX.generateMipmaps=false;GLOWTEX.minFilter=GLOWTEX.magFilter=THREE.LinearFilter;GLOWTEX.needsUpdate=true;
  LAMPU.uGlowMap.value=GLOWTEX;LAMPU.uLampP.value.set(M.x0,M.z0,1/(M.cell*N),M.g);try{buildRoofMap(M,GN)}catch(e){console.warn('Carte des toits',e)}}
@@ -1269,8 +1271,13 @@ function buildingLamps(o,have,mpu){
 const BIN_URLS=['trash_can%203.glb','trash_can_and_ashtray.glb','trash_can%204.glb'].map(n=>R2+'Trottoir/Poubelle/'+n);
 const BIN_HM=[1.0,1.0,1.0];       // hauteur voulue (m) de chaque modèle : change ici si une poubelle te paraît trop grande / petite
 const BIN_MAX_VERTS=1500000;      // garde-fou : budget total de sommets pour toutes les poubelles
-let BINGLB=[null,null,null],BINDIAG='non exécuté';
-function loadBinModels(){return Promise.all(BIN_URLS.map((u,i)=>new Promise(res=>{try{loader.load(u,g=>{BINGLB[i]=g.scene;res()},undefined,()=>{console.warn('Poubelle introuvable',u);res()})}catch(e){console.warn(e);res()}})))}
+let BINGLB=[null,null,null],BINDIAG='non exécuté',BINERR=[],BINFB=[];
+const binLoader=new THREE.GLTFLoader();
+try{if(THREE.DRACOLoader){const d=new THREE.DRACOLoader();d.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.5/');binLoader.setDRACOLoader(d)}}catch(e){console.warn('Draco',e)}
+try{if(window.MeshoptDecoder)binLoader.setMeshoptDecoder(window.MeshoptDecoder)}catch(e){console.warn('Meshopt',e)}
+function loadBinModels(){return Promise.all(BIN_URLS.map((u,i)=>new Promise(res=>{try{binLoader.load(u,g=>{BINGLB[i]=g.scene;res()},undefined,e=>{BINERR.push(i+1);console.warn('Poubelle GLB '+(i+1)+' : échec de chargement',u,e);res()})}catch(e){BINERR.push(i+1);console.warn(e);res()}})))}
+// poubelle de secours (si un GLB ne charge pas) : corps + couvercle, pour qu'il y ait TOUJOURS des poubelles
+function makeBinFallback(){const g=new THREE.Group(),mat=new THREE.MeshStandardMaterial({color:0x2d3a33,roughness:.75,metalness:.25}),a=new THREE.Mesh(new THREE.CylinderGeometry(.22,.19,.85,14),mat),b=new THREE.Mesh(new THREE.CylinderGeometry(.25,.25,.07,14),mat);a.position.y=.425;b.position.y=.885;g.add(a);g.add(b);return g}
 // Carrefours : on cherche les cases de route qui font partie d'une rue longue dans les DEUX sens (= le carré où deux rues se croisent), puis les 4 coins de ce carré → on file en diagonale jusqu'au trottoir
 function collectCorners(mpu){
  const C=LCTX;if(!C)return [];
@@ -1292,18 +1299,30 @@ function collectCorners(mpu){
    for(let t=0;t<=maxT+inw;t++){const i=ti+sx*t,j=tj+sz*t;if(i<0||j<0||i>=Dx||j>=Dz)break;const k=j*Dx+i,sw=C.S[k]&&!C.R[k];
     if(!found){if(sw){found=true;bi=i;bj=j;st=t}}else{if(!sw)break;bi=i;bj=j;if(t-st>=inw)break}}
    if(!found)continue;const r=Math.SQRT1_2;out.push({x:C.x0+(bi+.5)*C.cell,z:C.z0+(bj+.5)*C.cell,dx:sx*r,dz:sz*r})}}
- out.nc=nc;return out}
+ out.nc=nc;out.nb=out.length;
+ // + coins de trottoir « en pointe » (là où deux rues se croisent) : méthode robuste, identique à celle des lampadaires de coin
+ {const rc=Math.max(2,Math.round(2.2/cm)),tot=(2*rc+1)*(2*rc+1),cand=[];
+  for(let j=rc;j<Dz-rc;j++)for(let i=rc;i<Dx-rc;i++){const k=j*Dx+i;if(!C.S[k]||C.R[k])continue;let sx=0,sz=0,c=0,dm=1e9;
+   for(let b=-rc;b<=rc;b++)for(let a=-rc;a<=rc;a++){if(C.R[(j+b)*Dx+i+a]){sx+=a;sz+=b;c++;const d=Math.hypot(a,b);if(d<dm)dm=d}}
+   const f=c/tot;if(f<.6||dm<C.dMin||dm>C.dMax*1.6)continue;cand.push([f,i,j,sx,sz])}
+  cand.sort((p,q)=>q[0]-p[0]);const CR=9/mpu,CR2=CR*CR,g=new Map(),put=p=>{const key=Math.floor(p.x/CR)+','+Math.floor(p.z/CR);if(g.has(key))g.get(key).push(p);else g.set(key,[p])},near=(x,z)=>{const ci=Math.floor(x/CR),cj=Math.floor(z/CR);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=g.get((ci+a)+','+(cj+b));if(l)for(const q of l)if((q.x-x)**2+(q.z-z)**2<CR2)return true}return false};
+  out.forEach(put);let nt=0;
+  for(const [f,i,j,sx,sz] of cand){const x=C.x0+(i+.5)*C.cell,z=C.z0+(j+.5)*C.cell;if(near(x,z))continue;const l=Math.hypot(sx,sz)||1,p={x,z,dx:-sx/l,dz:-sz/l};out.push(p);put(p);nt++;if(out.length>2500)break} // dx,dz : vers l'intérieur du trottoir (à l'opposé de la route)
+  out.nt=nt}
+ return out}
 function placeBins(o,L,mpu){
- const C=LCTX;if(!C||!BINGLB.some(Boolean))return 0;
- const corners=collectCorners(mpu);BINDIAG='carrefours '+(corners.nc||0)+' · coins '+corners.length;if(!corners.length)return 0;
+ const C=LCTX;if(!C){BINDIAG='carte routes/trottoirs indisponible';return 0}
+ BINFB=[];BINGLB.forEach((sc,i)=>{if(!sc){BINGLB[i]=makeBinFallback();BINFB.push(i+1)}});
+ const corners=collectCorners(mpu);BINDIAG='carrefours '+(corners.nc||0)+' · coins '+corners.length+' (carrés '+(corners.nb||0)+' + pointes '+(corners.nt||0)+')';if(!corners.length)return 0;
  const U=1/mpu,R8=7*U;
  const okAt=(x,z)=>{const i=Math.floor((x-C.x0)/C.cell),j=Math.floor((z-C.z0)/C.cell);if(i<0||j<0||i>=C.Dx||j>=C.Dz)return null;const k=j*C.Dx+i;return (C.S[k]&&!C.R[k])?C.YS[k]:null};
  const OFF=[[.8,1],[.8,-1],[1.3,0],[.4,1.5],[.4,-1.5],[1.6,1],[1.6,-1],[0,0]]; // (m) dans le repère du coin : a = vers l'intérieur du trottoir, b = le long du trottoir
  const pts=[],D2=(1.5*U)**2;
  for(const c of corners){let ax=c.x,az=c.z,bd=R8*R8,lamp=false;for(const q of L){const d=(q.x-c.x)**2+(q.z-c.z)**2;if(d<bd){bd=d;ax=q.x;az=q.z;lamp=true}} // lampadaire le plus proche du coin (sinon : le coin lui-même)
   const tx=-c.dz,tz=c.dx;
-  for(const [a,b] of OFF){const x=ax+(c.dx*a+tx*b)*U,z=az+(c.dz*a+tz*b)*U,y=okAt(x,z);if(y===null)continue;
-   if(pts.some(q=>(q.x-x)**2+(q.z-z)**2<D2))break;pts.push({x,z,y,lamp});break}}
+  let ok=false;for(const [a,b] of OFF){const x=ax+(c.dx*a+tx*b)*U,z=az+(c.dz*a+tz*b)*U,y=okAt(x,z);if(y===null)continue;
+   ok=true;if(pts.some(q=>(q.x-x)**2+(q.z-z)**2<D2))break;pts.push({x,z,y,lamp});break}
+  if(!ok){const x=c.x+c.dx*.6*U,z=c.z+c.dz*.6*U,y=okAt(x,z);if(y!==null&&!pts.some(q=>(q.x-x)**2+(q.z-z)**2<D2))pts.push({x,z,y,lamp:false})}}
  BINDIAG+=' · emplacements '+pts.length+' ('+pts.filter(q=>q.lamp).length+' à côté d\'un lampadaire)';
  const mods=[];
  BINGLB.forEach((sc,idx)=>{if(!sc)return;sc.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(sc.matrixWorld).invert(),subs=[],v=new THREE.Vector3(),bb=new THREE.Box3();
@@ -1312,7 +1331,7 @@ function placeBins(o,L,mpu){
   subs.forEach(sb=>{const pa=sb.g.attributes.position;nvt+=pa.count;for(let i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(sb.M);bb.expandByPoint(v)}});
   const H=bb.max.y-bb.min.y;if(!(H>0))return;
   const c=bb.getCenter(new THREE.Vector3());mods.push({subs,mn:bb.min.y,cx:c.x,cz:c.z,H,nvt,hm:BIN_HM[idx]||1});console.log('[poubelle GLB '+idx+'] hauteur',H.toFixed(2),'sommets',nvt)});
- if(!mods.length)return 0;
+ if(!mods.length){BINDIAG+=' · modèles inutilisables';return 0}
  const pick=p=>{let h=Math.imul(Math.round(p.x*1000)^0x2c1b3c6d,0x85ebca6b)^Math.imul(Math.round(p.z*1000)^0x297a2d39,0xc2b2ae35);h^=h>>>13;h=Math.imul(h,0x27d4eb2f);h^=h>>>15;return h>>>0};
  let groups=mods.map(()=>[]);pts.forEach(p=>{p._h=pick(p);groups[p._h%mods.length].push(p)});
  groups=groups.map((l,mi)=>{const mx=Math.max(1,Math.floor(BIN_MAX_VERTS/mods.length/mods[mi].nvt));if(l.length<=mx)return l;const st=Math.ceil(l.length/mx);return l.filter((_,i)=>i%st===0)});
@@ -1431,7 +1450,7 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN+' ['+BINDIAG+' · modèles chargés '+BINGLB.filter(Boolean).length+'/3]';
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'POUBELLES : '+NBIN+' posées (GLB '+(3-BINFB.length)+'/3'+(BINFB.length?', secours pour n°'+BINFB.join(','):'')+') — Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN+' ['+BINDIAG+' · GLB chargés '+(3-BINFB.length)+'/3'+(BINFB.length?' · secours n°'+BINFB.join(','):'')+']';
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,15000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);Promise.all([loadLampModels(),loadBinModels()]).then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
