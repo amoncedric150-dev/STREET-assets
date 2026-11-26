@@ -378,7 +378,7 @@ function buildLights0(){
    // chaque lampadaire a son propre seuil d'allumage : un peu de hasard + une « vague » qui parcourt la ville → ils ne s'allument jamais tous ensemble
    let h=Math.imul(Math.round(p.x*10)^0x9e3779b1,0x85ebca6b)^Math.imul(Math.round(p.z*10)^0x51ed270b,0xc2b2ae35);h^=h>>>13;h=Math.imul(h,0x27d4eb2f);h^=h>>>15;h>>>=0;
    const r1=(h&0xffff)/65535,r2=(h>>>16)/65535,sw=.5+.5*Math.sin(p.x*.013+1.3)*Math.cos(p.z*.011);
-   LAMPTH[i]=.06+.58*sw+.14*r1;LAMPPH[i]=r2*6.2832}); // seuil FIXE : vague spatiale douce qui suit le cycle jour/nuit, aucun hasard dans le temps
+   LAMPTH[i]=p.bulb?.5+.2*sw+.06*r1:.06+.58*sw+.14*r1;LAMPPH[i]=r2*6.2832}); // seuil FIXE : vague spatiale douce qui suit le cycle jour/nuit, aucun hasard dans le temps
   const posA=new THREE.BufferAttribute(pos,3);lampCol=new THREE.BufferAttribute(new Float32Array(n*3),3);lampCol.setUsage(THREE.DynamicDrawUsage);
   const mk=(size,op)=>{const g=new THREE.BufferGeometry();g.setAttribute('position',posA);g.setAttribute('color',lampCol);
    const m=new THREE.PointsMaterial({map:GLOW,color:0xffb866,vertexColors:true,size,sizeAttenuation:true,transparent:true,opacity:op,blending:THREE.AdditiveBlending,depthWrite:false});
@@ -386,7 +386,7 @@ function buildLights0(){
   mk(10,.2);haloMat=mk(3.2,.6); // voile diffus + cœur lumineux
   poolMat=new THREE.MeshBasicMaterial({map:GLOW,color:0xffb866,transparent:true,opacity:.16,blending:THREE.AdditiveBlending,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
   poolIm=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),poolMat,n);const m4=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(13,1,13),pp=new THREE.Vector3();
-  LAMPS.forEach((p,i)=>{m4.compose(pp.set(p.x,groundAt(p.x,p.z)+.12,p.z),q,sc);poolIm.setMatrixAt(i,m4)});
+  LAMPS.forEach((p,i)=>{m4.compose(pp.set(p.x,groundAt(p.x,p.z)+(p.bulb?.4:.12),p.z),q,sc);poolIm.setMatrixAt(i,m4)});
   poolIm.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(n*3),3);poolIm.instanceColor.setUsage(THREE.DynamicDrawUsage);
   poolIm.frustumCulled=false;FX.add(poolIm);
   patchLampLight();
@@ -1143,7 +1143,7 @@ function placeLamps(o,L,mpu){
  mods.forEach((md,mi)=>{const list=groups[mi];if(!list.length)return;
   md.subs.forEach(sb=>{const g=sb.g,pa=g.attributes.position,na=g.attributes.normal,ua=g.attributes.uv,ix=g.index,nv0=pa.count,ni=ix?ix.count:nv0,K=list.length;
    const P=new Float32Array(nv0*K*3),Nn=na?new Float32Array(nv0*K*3):null,Uu=ua?new Float32Array(nv0*K*2):null,I=new Uint32Array(ni*K);let o3=0,o2=0,oi=0,base=0;
-   for(const p of list){const hm=Math.min(LAMP_MAX_H,Math.max(LAMP_MIN_H,p.hm)),k=(hm/mpu)/md.H;
+   for(const p of list){const hm=Math.min(LAMP_MAX_H,Math.max(LAMP_MIN_H,p.hm))*LAMP_SCALE,k=(hm/mpu)/md.H;
     let phi=0;if(md.ang!==null&&Math.hypot(p.ax,p.az)>.5/mpu)phi=Math.atan2(p.ax,p.az)-md.ang;else phi=(p._h%4)*Math.PI/2;
     T0.makeTranslation(-md.px,-md.mn,-md.pz);S1.makeScale(k,k,k);R1.makeRotationY(phi);T1.makeTranslation(p.x,p.y-.03/mpu,p.z);
     W.copy(T1).multiply(R1).multiply(S1).multiply(T0).multiply(sb.M);N3.getNormalMatrix(W);
@@ -1153,11 +1153,11 @@ function placeLamps(o,L,mpu){
    const G=new THREE.BufferGeometry();G.setAttribute('position',new THREE.BufferAttribute(P,3));if(Nn)G.setAttribute('normal',new THREE.BufferAttribute(Nn,3));if(Uu)G.setAttribute('uv',new THREE.BufferAttribute(Uu,2));G.setIndex(new THREE.BufferAttribute(I,1));
    if(!Nn)G.computeVertexNormals();
    const me=new THREE.Mesh(G,sb.mat);me.name='Poteau_GLB_'+mi;me.userData.noLamp=true;grp.add(me);tot+=nv0*K});
-  list.forEach(p=>{if(p._b)lampPts.push(p._b[0],p._b[1],p._b[2]);else lampPts.push(p.x,p.y+Math.min(LAMP_MAX_H,Math.max(LAMP_MIN_H,p.hm))/mpu,p.z)})});
+  list.forEach(p=>{if(p._b)lampPts.push(p._b[0],p._b[1],p._b[2]);else lampPts.push(p.x,p.y+Math.min(LAMP_MAX_H,Math.max(LAMP_MIN_H,p.hm))*LAMP_SCALE/mpu,p.z)})});
  grp.userData.lampPts=lampPts;grp.userData.noLamp=true;o.add(grp);console.log('[lampadaires] posés',L.length,'par modèle',groups.map(g=>g.length),'sommets',tot);return L.length}
 
 // ===== Lampadaires en plus : le long des bordures de trottoir, là où il n'y avait pas d'ancien lampadaire =====
-let LAMPDIAG='';const LAMP_FILL=true,LAMP_SP=40,LAMP_H=7.5; // espacement entre lampadaires (m) · distance mini à un ancien lampadaire (m) · hauteur (m)
+let LAMPDIAG='';const LAMP_FILL=true,LAMP_SP=40,LAMP_H=7.5,LAMP_KEEP=14,LAMP_CORNER=12,LAMP_SCALE=.8; // espacement des paires (m) · distance mini entre lampadaires (m) · espacement des lampadaires de coin (m) · échelle de TOUS les lampadaires (1 = taille de l'ancien) // espacement entre lampadaires (m) · distance mini à un ancien lampadaire (m) · hauteur (m)
 function fillLamps(o,have,mpu){
  if(!LAMP_FILL)return [];
  o.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(o.matrixWorld).invert(),m=new THREE.Matrix4(),v=new THREE.Vector3(),road=[],walk=[],big=[],bb=new THREE.Box3(),sv=new THREE.Vector3();
@@ -1174,9 +1174,10 @@ function fillLamps(o,have,mpu){
  // le goudron du modèle passe aussi sous les trottoirs et les bâtiments : tout ce qui est plus haut que la chaussée n'est PAS une route (comme pour les marquages)
  {const B=new Uint8Array(n),YB=new Float32Array(n);big.forEach(c=>MK_raster(tris(c),G,B,YB));const lift=.06/mpu;
   for(let k=0;k<n;k++)if(R[k]&&(S[k]||(B[k]&&YB[k]>Y[k]+lift)))R[k]=0} // l'emprise d'un trottoir n'est jamais de la route
- const cm=cell*mpu,rr=Math.max(2,Math.round(1.1/cm)),dMin=.45/cm,dMax=1.1/cm,SP=LAMP_SP/mpu,out=[],per=3/cm,inb=.7/cm,DG={cand:0,droit:0,traverse:0,large:0,libre:0,seul:0,road:road.length,walk:walk.length,R:0,S:0,g:Dx+'x'+Dz};for(let q=0;q<n;q++){if(R[q])DG.R++;if(S[q])DG.S++}
+ const cm=cell*mpu,rr=Math.max(2,Math.round(1.1/cm)),dMin=.45/cm,dMax=1.1/cm,SP=LAMP_SP/mpu,out=[],per=3/cm,inb=.7/cm,KP=LAMP_KEEP/mpu,DG={cand:0,droit:0,traverse:0,large:0,libre:0,seul:0,road:road.length,walk:walk.length,R:0,S:0,g:Dx+'x'+Dz};for(let q=0;q<n;q++){if(R[q])DG.R++;if(S[q])DG.S++}
  const cs=SP,grid=new Map(),key=(a,b)=>(a+8192)*16384+(b+8192),add=p=>{const k=key(Math.floor(p.x/cs),Math.floor(p.z/cs)),l=grid.get(k);if(l)l.push(p);else grid.set(k,[p])};
- const far=(x,z)=>{const ci=Math.floor(x/cs),cj=Math.floor(z/cs);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=grid.get(key(ci+a,cj+b));if(l)for(const p of l){const ex=p.x-x,ez=p.z-z;if(ex*ex+ez*ez<SP*SP)return false}}return true};
+ const far=(x,z,rp,ro)=>{const ci=Math.floor(x/cs),cj=Math.floor(z/cs);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=grid.get(key(ci+a,cj+b));if(l)for(const p of l){const r=p.t==='p'?rp:ro,ex=p.x-x,ez=p.z-z;if(ex*ex+ez*ez<r*r)return false}}return true};
+ have.forEach(p=>add({x:p.x,z:p.z,t:'o'}));
  const isW=(i,j)=>i>=0&&j>=0&&i<Dx&&j<Dz&&S[j*Dx+i]&&!R[j*Dx+i];
  for(let j=rr;j<Dz-rr;j++)for(let i=rr;i<Dx-rr;i++){const k=j*Dx+i;if(!S[k]||R[k])continue;
   let sx=0,sz=0,c=0,dm=1e9;
@@ -1185,22 +1186,30 @@ function fillLamps(o,have,mpu){
   const l=Math.hypot(sx,sz)||1,dx=sx/l,dz=sz/l,px=-dz,pz=dx;
   // bordure droite : le trottoir continue 6 m de chaque côté (pas de coin de carrefour)
   if(!isW(Math.round(i+px*per),Math.round(j+pz*per))&&!isW(Math.round(i-px*per),Math.round(j-pz*per)))continue;DG.droit++;
-  const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;if(!far(x,z))continue;
+  const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;if(!far(x,z,SP,KP))continue;
   // traverse la rue en ligne droite jusqu'au trottoir d'en face : c'est la rue « principale » si elle fait 8 à 45 m de large
   let t=1,onRoad=false,oi=-1,oj=-1;
   let gap=0;for(;t<46/cm;t++){const ii=Math.round(i+dx*t),jj=Math.round(j+dz*t);if(ii<0||jj<0||ii>=Dx||jj>=Dz)break;const q=jj*Dx+ii;if(R[q]){onRoad=true;gap=0}else if(onRoad){if(S[q]){oi=ii;oj=jj;break}if(++gap>2.5/cm)break}} // la bordure entre route et trottoir n'est ni l'un ni l'autre : on la saute
   if(oi<0)continue;DG.traverse++;const wm=t*cm;if(wm<8||wm>45)continue;DG.large++;
   const fi=Math.round(oi+dx*inb),fj=Math.round(oj+dz*inb),ok2=isW(fi,fj),qi=ok2?fi:oi,qj=ok2?fj:oj;
   if(!isW(Math.round(qi+px*per),Math.round(qj+pz*per))&&!isW(Math.round(qi-px*per),Math.round(qj-pz*per)))continue;
-  const x2=x0+(qi+.5)*cell,z2=z0+(qj+.5)*cell;if(!far(x2,z2))continue;DG.libre++;
+  const x2=x0+(qi+.5)*cell,z2=z0+(qj+.5)*cell;if(!far(x2,z2,SP,KP))continue;DG.libre++;
   const a=1/mpu;
-  out.push({x,z,y:YS[k],hm:LAMP_H,ax:dx*a,az:dz*a},{x:x2,z:z2,y:YS[qj*Dx+qi],hm:LAMP_H,ax:-dx*a,az:-dz*a});add({x,z});add({x:x2,z:z2});
+  out.push({x,z,y:YS[k],hm:LAMP_H,ax:dx*a,az:dz*a},{x:x2,z:z2,y:YS[qj*Dx+qi],hm:LAMP_H,ax:-dx*a,az:-dz*a});add({x,z,t:'p'});add({x:x2,z:z2,t:'p'});
   if(out.length>800)return out}
+ // lampadaires de coin : aux angles des trottoirs, là où deux rues se croisent
+ {const rc=Math.max(2,Math.round(2.2/cm)),tot=(2*rc+1)*(2*rc+1),cand=[];DG.coin=0;
+  for(let j=rc;j<Dz-rc;j++)for(let i=rc;i<Dx-rc;i++){const k=j*Dx+i;if(!S[k]||R[k])continue;let sx=0,sz=0,c=0,dm=1e9;
+   for(let b=-rc;b<=rc;b++)for(let a=-rc;a<=rc;a++){if(R[(j+b)*Dx+i+a]){sx+=a;sz+=b;c++;const d=Math.hypot(a,b);if(d<dm)dm=d}}
+   const f=c/tot;if(f<.6||dm<dMin||dm>dMax*1.6)continue;cand.push([f,i,j,sx,sz])}
+  cand.sort((p,q)=>q[0]-p[0]);const CR=LAMP_CORNER/mpu;
+  for(const [f,i,j,sx,sz] of cand){const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;if(!far(x,z,CR,CR))continue;const l=Math.hypot(sx,sz)||1,a=1/mpu;
+   out.push({x,z,y:YS[j*Dx+i],hm:LAMP_H,ax:sx/l*a,az:sz/l*a});add({x,z,t:'c'});DG.coin++;if(out.length>1500)break}}
  if(out.length<20){for(let j=rr;j<Dz-rr;j++)for(let i=rr;i<Dx-rr;i++){const k=j*Dx+i;if(!S[k]||R[k])continue;let sx=0,sz=0,c=0,dm=1e9;
   for(let b=-rr;b<=rr;b++)for(let a=-rr;a<=rr;a++){if(R[(j+b)*Dx+i+a]){sx+=a;sz+=b;c++;const d=Math.hypot(a,b);if(d<dm)dm=d}}
-  if(!c||dm<dMin||dm>dMax)continue;const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;if(!far(x,z))continue;const l=Math.hypot(sx,sz)||1,a=1/mpu;
-  out.push({x,z,y:YS[k],hm:LAMP_H,ax:sx/l*a,az:sz/l*a});add({x,z});DG.seul++;if(out.length>800)break}}
- LAMPDIAG=' [routes '+DG.road+' trottoirs '+DG.walk+' grille '+DG.g+' casesR '+DG.R+' casesS '+DG.S+' · bordures '+DG.cand+' · droites '+DG.droit+' · traversée '+DG.traverse+' · rue 8-45 m '+DG.large+' · paires '+DG.libre+' · seuls '+DG.seul+']';console.log('[lampadaires]',LAMPDIAG);return out}
+  if(!c||dm<dMin||dm>dMax)continue;const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;if(!far(x,z,SP,KP))continue;const l=Math.hypot(sx,sz)||1,a=1/mpu;
+  out.push({x,z,y:YS[k],hm:LAMP_H,ax:sx/l*a,az:sz/l*a});add({x,z,t:'p'});DG.seul++;if(out.length>800)break}}
+ LAMPDIAG=' [routes '+DG.road+' trottoirs '+DG.walk+' grille '+DG.g+' casesR '+DG.R+' casesS '+DG.S+' · bordures '+DG.cand+' · droites '+DG.droit+' · traversée '+DG.traverse+' · rue 8-45 m '+DG.large+' · paires '+DG.libre+' · coins '+DG.coin+' · seuls '+DG.seul+']';console.log('[lampadaires]',LAMPDIAG);return out}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
  o.updateMatrixWorld(true);
@@ -1281,7 +1290,7 @@ function start(o){
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
  // Objets supprimés définitivement (par nom exact) : retirés du modèle AVANT la création des 3x3 tuiles, donc partout
  let LPOS=[];try{LPOS=collectLamps(o,s0*uf)}catch(e){console.warn('Lampadaires',e)}
- let NFILL=0;try{const E=fillLamps(o,[],s0*uf);NFILL=E.length;LPOS=E}catch(e){console.warn('Remplissage lampadaires',e);LAMPDIAG=' [ERREUR remplissage : '+e.message+']'}
+ let NFILL=0;try{const E=fillLamps(o,LPOS,s0*uf);NFILL=E.length;LPOS=LPOS.concat(E)}catch(e){console.warn('Remplissage lampadaires',e);LAMPDIAG=' [ERREUR remplissage : '+e.message+']'}
  const ND=(()=>{const del=[];o.traverse(c=>{if(c.isMesh&&(KILL.includes(c.name)||KILLRE.test(c.name||'')||(()=>{const ms=[].concat(c.material).filter(Boolean);return false})()))del.push(c)});
   del.forEach(c=>{if(c.geometry)c.geometry.dispose();c.parent&&c.parent.remove(c)});return del.length})();
   const AW=planAwnings(o,s0*uf);
@@ -1302,7 +1311,7 @@ function start(o){
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
  msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés)';
- {const d=document.createElement('div');d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.75);color:#fff;font:11px/1.3 monospace;padding:4px 6px;pointer-events:none';d.textContent='v8 · LAMPADAIRES posés '+NLP+'/'+LPOS.length+' · modèles GLB chargés '+LAMPGLB.filter(Boolean).length+'/2'+LAMPDIAG;document.body.appendChild(d);setTimeout(()=>d.remove(),90000)}
+ {const d=document.createElement('div');d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.75);color:#fff;font:11px/1.3 monospace;padding:4px 6px;pointer-events:none';d.textContent='v9 · LAMPADAIRES posés '+NLP+'/'+LPOS.length+' · modèles GLB chargés '+LAMPGLB.filter(Boolean).length+'/2'+LAMPDIAG;document.body.appendChild(d);setTimeout(()=>d.remove(),90000)}
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);loadLampModels().then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
