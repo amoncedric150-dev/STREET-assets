@@ -152,7 +152,7 @@ function applyTOD(now){
 // 1) Chaque texture de façade est analysée une fois : les vitres (zones sombres rectangulaires) sont repérées une par une et reçoivent un identifiant → « carte des fenêtres ».
 // 2) Le shader allume les fenêtres UNE PAR UNE (chacune a son propre seuil) quand la nuit tombe, avec sa propre couleur et sa propre intensité.
 const GLASSRE=/glass|window|vitre|fen[eê]tre/i;
-const WINK={uGain:{value:0.5},uMax:{value:0.7},uGy:{value:-1e4}}; // uGy = altitude du sol (fenêtres de repli : seulement au-dessus du rez-de-chaussée)
+const WINK={uGain:{value:0.5},uMax:{value:0.7},uGy:{value:-1e4},uFar:{value:700}}; // uGy = altitude du sol (fenêtres de repli : seulement au-dessus du rez-de-chaussée)
  // uGain = intensité des fenêtres (baisse si encore trop fort) · uMax = part maximale de fenêtres allumées en pleine nuit
 const WINT={value:0};
 // Cherche les vitres dans une texture de façade : zones sombres rectangulaires (même si des croisillons clairs les coupent).
@@ -196,11 +196,11 @@ function labelWins(lum,w,h,th){
   const a=Math.max(0,Math.min(1,(th+8-lum[i])/8));if(a<=0)continue;
   const x=i%w,y=(i-x)/w;out[i*4]=o.id;out[i*4+1]=Math.round(255*(x-o.x0)/Math.max(1,o.x1-o.x0));out[i*4+2]=Math.round(255*(y-o.y0)/Math.max(1,o.y1-o.y0));out[i*4+3]=Math.round(a*255)}
  return{rgba:out,count,area:tot}}
-const WINFUNCS='uniform float uWin;uniform float uTime;uniform float uMode;uniform float uGain;uniform float uMax;uniform float uGy;uniform sampler2D uWinTex;varying vec3 vWP;varying vec3 vWN;varying vec3 vOrg;'+
+const WINFUNCS='uniform float uWin;uniform float uTime;uniform float uMode;uniform float uGain;uniform float uMax;uniform float uGy;uniform float uWFar;uniform sampler2D uWinTex;varying vec3 vWP;varying vec3 vWN;varying vec3 vOrg;'+
  'float h31(vec3 p){p=fract(p*0.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}';
 // uMode : 0 = rien · 1 = carte des fenêtres (texture) · 2 = texture sans carte (zones sombres, repli) · 3 = vitre unie (sans texture)
 const WING0=3.0,WING1=5.5; // hauteur (m) au-dessus du sol : en dessous de WING0 aucune fenêtre allumée, au-dessus de WING1 plein effet
-const WINGLSL='if(uMode>0.5&&uWin>0.002){'+
+const WINGLSL='float wdist=distance(vWP,cameraPosition);if(uMode>0.5&&uWin>0.002&&wdist<uWFar){'+
  'float wl=1.0-smoothstep(0.3,0.6,abs(normalize(vWN).y));'+                      // seulement les murs verticaux
  'float cov=1.0,id=0.5,lx=0.5,ly=0.5;bool got=false;\n'+
  '#ifdef USE_MAP\n'+
@@ -216,12 +216,12 @@ const WINGLSL='if(uMode>0.5&&uWin>0.002){'+
  'vec3 col=mix(mix(vec3(1.0,0.50,0.17),vec3(1.0,0.74,0.40),min(1.0,h2*1.1)),vec3(0.55,0.72,1.0),tv);'+
  'float br=0.5+0.5*h3;float fl=1.0+tv*0.12*sin(uTime*9.0+id*40.0);'+
  'float vig=smoothstep(0.0,0.16,min(lx,1.0-lx))*smoothstep(0.0,0.12,min(ly,1.0-ly));'+ // bords de la vitre un peu plus sombres
- 'totalEmissiveRadiance+=col*(br*fl*cov*lit*wl*(0.5+0.5*vig)*(0.8+0.2*ly)*uGain);}';
+ 'totalEmissiveRadiance+=col*(br*fl*cov*lit*wl*(0.5+0.5*vig)*(0.8+0.2*ly)*uGain*(1.0-smoothstep(uWFar*0.7,uWFar,wdist)));}';
 function patchWindows(m,full){
  const mode=full?3:1;if(m.userData.win===mode)return;m.userData.win=mode;
  const U=m.userData.winU||(m.userData.winU={uWinTex:{value:NEUTRAL},uMode:{value:0}});
  if(full)U.uMode.value=3;else if(!m.map)U.uMode.value=2;else queueMask(m); // texture : la carte est calculée en tâche de fond puis le shader s'active
- m.userData.winBC=sh=>{sh.uniforms.uWin=WIN;sh.uniforms.uTime=WINT;sh.uniforms.uGain=WINK.uGain;sh.uniforms.uMax=WINK.uMax;sh.uniforms.uGy=WINK.uGy;sh.uniforms.uWinTex=U.uWinTex;sh.uniforms.uMode=U.uMode;
+ m.userData.winBC=sh=>{sh.uniforms.uWin=WIN;sh.uniforms.uTime=WINT;sh.uniforms.uGain=WINK.uGain;sh.uniforms.uMax=WINK.uMax;sh.uniforms.uGy=WINK.uGy;sh.uniforms.uWinTex=U.uWinTex;sh.uniforms.uMode=U.uMode;sh.uniforms.uWFar=WINK.uFar;
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWP;varying vec3 vWN;varying vec3 vOrg;')
    .replace('#include <begin_vertex>','#include <begin_vertex>\nvWP=(modelMatrix*vec4(transformed,1.0)).xyz;vWN=normalize(mat3(modelMatrix)*normal);vOrg=modelMatrix[3].xyz;');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\n'+WINFUNCS)
@@ -230,7 +230,7 @@ function patchWindows(m,full){
 // un seul onBeforeCompile par matériau : fenêtres (winBC) + lumière des lampadaires (lampOn), dans cet ordre
 function composeBC(m){const w=m.userData.winBC,l=m.userData.lampOn,q=m.userData.swBC,t=m.userData.stBC;
  m.onBeforeCompile=sh=>{if(q)q(sh);if(t)t(sh);if(w)w(sh);if(l)lampBC(sh)};
- m.customProgramCacheKey=()=>(w?'win5'+(m.map?'m':'g'):'')+(l?'|lamp3':'')+(q?'|sw1':'')+(t?'|st1'+(t.sw?'s':''):'');m.needsUpdate=true}
+ m.customProgramCacheKey=()=>(w?'win6'+(m.map?'m':'g'):'')+(l?'|lamp4':'')+(q?'|sw1':'')+(t?'|st1'+(t.sw?'s':''):'');m.needsUpdate=true}
 // --- carte des fenêtres d'une texture (calculée une seule fois par image, une texture par « tick » pour ne pas figer le téléphone)
 const NEUTRAL=new THREE.DataTexture(new Uint8Array([128,128,128,0]),1,1,THREE.RGBAFormat);NEUTRAL.needsUpdate=true;
 const MASKS=new Map(),MQ=[];let mBusy=false,NWMAP=0;
@@ -268,7 +268,7 @@ const GLOW=(()=>{const c=document.createElement('canvas');c.width=c.height=64;co
  g.fillStyle=gr;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c)})();
 const FX=new THREE.Group();scene.add(FX);
 const LAMPS=[],LAMPRE=/lamp|lantern|luminair|street_?light|light_?pole|lampadaire|bulb/i;
-let haloMat=null,poolMat=null,lampCol=null,poolIm=null,LAMPB=new Float32Array(0),LAMPTH=LAMPB,LAMPPH=LAMPB,_lampAny=false;
+let veilMat=null,haloMat=null,poolMat=null,lampCol=null,poolIm=null,LAMPB=new Float32Array(0),LAMPTH=LAMPB,LAMPPH=LAMPB,_lampAny=false;
 // Carte de lumière : vue du dessus de toute la ville (1 texture). Chaque lampadaire allumé y dessine sa tache ; les matériaux de la ville la lisent (sol, routes, façades, voitures)
 // → tous les lampadaires éclairent leur environnement en même temps, pour le prix d'UNE lecture de texture (pas de PointLight, rien ne suit le joueur).
 const LAMP_R=11,CROSS_R=26,LAMPLM=IS_MOBILE?512:768; // rayon d'éclairage (m) · résolution de la carte
@@ -276,21 +276,21 @@ const LAMPSPR=(()=>{const c=document.createElement('canvas');c.width=c.height=12
  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.3,'rgba(255,255,255,.7)');gr.addColorStop(.62,'rgba(255,255,255,.26)');gr.addColorStop(.85,'rgba(255,255,255,.05)');gr.addColorStop(1,'rgba(255,255,255,0)');
  g.fillStyle=gr;g.fillRect(0,0,128,128);return c})();
 let LAMPCV=null,LAMPTEX=null,LAMPQ=new Uint8Array(0),_lampDirty=false,_lastBake=0;
-const LAMPU={uLampMap:{value:null},uLampP:{value:new THREE.Vector4(0,0,1,0)},uLampCol:{value:new THREE.Vector3(1.0,.6,.27)},uLampOn:{value:0},uGlowMap:{value:null},uGlowK:{value:0},uGlowCol:{value:new THREE.Vector3(1.0,.62,.30)}};
-const LAMPGLSL='if(uLampOn>0.002){vec2 lq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
+const LAMPU={uLampMap:{value:null},uLampP:{value:new THREE.Vector4(0,0,1,0)},uLampCol:{value:new THREE.Vector3(1.0,.6,.27)},uLampOn:{value:0},uGlowMap:{value:null},uGlowK:{value:0},uGlowCol:{value:new THREE.Vector3(1.0,.62,.30)},uLampFar:{value:320}};
+const LAMPGLSL='float ld=distance(vLP,cameraPosition);if(uLampOn>0.002&&ld<uLampFar){vec2 lq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
  'float ll=texture2D(uLampMap,clamp(lq,0.0,1.0)).r*step(0.0,min(lq.x,lq.y))*step(max(lq.x,lq.y),1.0);'+
  'float hh=1.0-smoothstep(1.5,9.0,vLP.y-uLampP.w);'+                       // la lumière retombe avec la hauteur (toits non éclairés)
  'float up=smoothstep(0.45,0.85,normalize(vLN).y);'+                       // sol / trottoir = plein · murs des bâtiments (rez-de-chaussée compris) = AUCUNE lumière
- 'totalEmissiveRadiance+=diffuseColor.rgb*uLampCol*(ll*hh*up*uLampOn);}';
+ 'totalEmissiveRadiance+=diffuseColor.rgb*uLampCol*(ll*hh*up*uLampOn*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
 // Lueur des fenêtres : les bâtiments éclairés projettent une lumière chaude et douce sur la rue, les carrefours et les façades voisines (carte du dessus floutée, calculée une fois)
 const GLOWAMP=.55; // intensité de la lueur (baisse si trop forte)
 let GLOWTEX=null;
-const GLOWGLSL='if(uGlowK>0.002){vec2 gq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
+const GLOWGLSL='if(uGlowK>0.002&&ld<uLampFar){vec2 gq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
  'float gg=texture2D(uGlowMap,clamp(gq,0.0,1.0)).r*step(0.0,min(gq.x,gq.y))*step(max(gq.x,gq.y),1.0);'+
  'float gh=1.0-smoothstep(2.0,16.0,vLP.y-uLampP.w);'+
  'float gu=smoothstep(0.45,0.85,normalize(vLN).y);'+ // lueur : seulement sur le sol, jamais sur les murs
  
- 'totalEmissiveRadiance+=diffuseColor.rgb*uGlowCol*(gg*gh*gu*uGlowK);}';
+ 'totalEmissiveRadiance+=diffuseColor.rgb*uGlowCol*(gg*gh*gu*uGlowK*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
 function boxBlur(src,GN,r){const t=new Float32Array(src.length),o=new Float32Array(src.length),L=2*r+1;
  for(let y=0;y<GN;y++){const row=y*GN;let s=0;for(let k=-r;k<=r;k++)s+=(k>=0&&k<GN)?src[row+k]:0;
   for(let x=0;x<GN;x++){t[row+x]=s/L;const a=x-r,b=x+r+1;s-=(a>=0&&a<GN)?src[row+a]:0;s+=(b>=0&&b<GN)?src[row+b]:0}}
@@ -310,7 +310,7 @@ function buildGlowMap(){const M=MAP;if(!M)return;
 function lampBC(sh){Object.assign(sh.uniforms,LAMPU);
  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vLP;varying vec3 vLN;')
   .replace('#include <begin_vertex>','#include <begin_vertex>\nvec4 lw0=vec4(transformed,1.0);\n#ifdef USE_INSTANCING\nlw0=instanceMatrix*lw0;\n#endif\nvLP=(modelMatrix*lw0).xyz;vLN=normalize(mat3(modelMatrix)*normal);');
- sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nuniform sampler2D uLampMap;uniform vec4 uLampP;uniform vec3 uLampCol;uniform float uLampOn;uniform sampler2D uGlowMap;uniform float uGlowK;uniform vec3 uGlowCol;varying vec3 vLP;varying vec3 vLN;')
+ sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nuniform sampler2D uLampMap;uniform vec4 uLampP;uniform vec3 uLampCol;uniform float uLampOn;uniform float uLampFar;uniform sampler2D uGlowMap;uniform float uGlowK;uniform vec3 uGlowCol;varying vec3 vLP;varying vec3 vLN;')
   .replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n'+LAMPGLSL+GLOWGLSL)}
 function patchLampLight(){const seen=new Set();let n=0;
  scene.traverse(o=>{if(!o.isMesh||o===skyDome||o.parent===FX)return;
@@ -318,7 +318,7 @@ function patchLampLight(){const seen=new Set();let n=0;
 function bakeLampMap(){if(!LAMPCV||!MAP)return;
  const g=LAMPCV.getContext('2d'),W=LAMPLM,k=W/(MAP.cell*N),sp=2*LAMP_R*k;
  g.globalCompositeOperation='source-over';g.globalAlpha=1;g.fillStyle='#000';g.fillRect(0,0,W,W);g.globalCompositeOperation='lighter';
- for(let i=0;i<LAMPS.length;i++){const q=LAMPQ[i];if(!q)continue;const p=LAMPS[i];const s2=p.nh?sp*CROSS_R/LAMP_R:sp;g.globalAlpha=q/16;g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2);if(p.nh)g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2)} // carrefour : 2 passes = zone très éclairée plus large
+ for(let i=0;i<LAMPS.length;i++){const q=LAMPQ[i];if(!q)continue;const p=LAMPS[i];const s2=p.nh?sp*CROSS_R/LAMP_R:sp;g.globalAlpha=q/10;g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2);if(p.nh)g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2)} // carrefour : 2 passes = zone très éclairée plus large
  g.globalAlpha=1;LAMPTEX.needsUpdate=true}
 function isLampMesh(c){if(c.userData&&c.userData.noLamp)return false;if(LAMPNAMES.has(c.name)||LAMPRE.test(c.name||''))return true;
  for(const m of [].concat(c.material))if(m&&m.name&&LAMPRE.test(m.name))return true;
@@ -383,19 +383,19 @@ function buildLights0(){
   const mk=(size,op)=>{const g=new THREE.BufferGeometry();g.setAttribute('position',posA);g.setAttribute('color',lampCol);
    const m=new THREE.PointsMaterial({map:GLOW,color:0xffb866,vertexColors:true,size,sizeAttenuation:true,transparent:true,opacity:op,blending:THREE.AdditiveBlending,depthWrite:false});
    const pts=new THREE.Points(g,m);pts.frustumCulled=false;FX.add(pts);return m};
-  mk(10,.2);haloMat=mk(3.2,.6); // voile diffus + cœur lumineux
+  veilMat=mk(10,.2);haloMat=mk(3.2,.6); // voile diffus + cœur lumineux
   poolMat=new THREE.MeshBasicMaterial({map:GLOW,color:0xffb866,transparent:true,opacity:.16,blending:THREE.AdditiveBlending,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
   poolIm=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),poolMat,n);const m4=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(13,1,13),pp=new THREE.Vector3();
   LAMPS.forEach((p,i)=>{m4.compose(pp.set(p.x,groundAt(p.x,p.z)+(p.bulb?.4:.12),p.z),q,sc);poolIm.setMatrixAt(i,m4)});
   poolIm.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(n*3),3);poolIm.instanceColor.setUsage(THREE.DynamicDrawUsage);
   poolIm.frustumCulled=false;FX.add(poolIm);
-  patchLampLight();
+  patchLampLight();try{perfApply()}catch(e){}
   return how}
 // allume chaque lampadaire selon le niveau « nuit » du cycle (TOD.lamp) : seuil fixe par lampadaire, montée douce, AUCUN scintillement aléatoire
 function updateLampFX(now,Lv){
   const n=LAMPS.length;if(!n||!lampCol||!poolIm)return false;
   const ca=lampCol.array,pa=poolIm.instanceColor.array;let any=false,ch=false;
-  for(let i=0;i<n;i++){const th=LAMPTH[i],b=smt(th,th+.12,Lv),q=Math.round(b*16);
+  for(let i=0;i<n;i++){const th=LAMPTH[i],b=smt(th,th+.12,Lv),q=Math.round(b*10);
    if(q!==LAMPQ[i]){LAMPQ[i]=q;_lampDirty=true}
    if(Math.abs(b-LAMPB[i])>.002){LAMPB[i]=b;ch=true;const bv=LAMPS[i].nh?0:b;ca[i*3]=ca[i*3+1]=ca[i*3+2]=bv;pa[i*3]=pa[i*3+1]=pa[i*3+2]=bv}
    if(b>.004)any=true}
@@ -415,7 +415,7 @@ function todStep(dt,now){
   applyTOD(now);WINT.value=now%628.318;skyDome.position.copy(cam.position);if(MAP)placeSun();
   TOD.dt=dt;const any=updateLampFX(now,TOD.lamp);FX.visible=any;LAMPU.uLampOn.value=any?1:0;LAMPU.uGlowK.value=GLOWTEX?WIN.value*GLOWAMP:0;
   // la carte de lumière n'est redessinée que si un lampadaire a vraiment changé de niveau, et pas plus de ~3 fois/s
-  if(_lampDirty&&now-_lastBake>(IS_MOBILE?.35:.2)){_lastBake=now;_lampDirty=false;bakeLampMap()}
+  if(_lampDirty&&now-_lastBake>(IS_MOBILE?.5:.3)){_lastBake=now;_lampDirty=false;bakeLampMap()}
   if(now-_ck>.25){_ck=now;const h=hourOf(TOD.t)%24;document.getElementById('clk').textContent=pad2(Math.floor(h))+':'+pad2(Math.floor((h%1)*60))+' · '+TOD.label}}
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshStandardMaterial({color:0x4a4e52,roughness:1}));
 ground.rotation.x=-Math.PI/2;scene.add(ground);
@@ -1175,6 +1175,7 @@ function fillLamps(o,have,mpu){
  {const B=new Uint8Array(n),YB=new Float32Array(n);big.forEach(c=>MK_raster(tris(c),G,B,YB));const lift=.06/mpu;
   for(let k=0;k<n;k++)if(R[k]&&(S[k]||(B[k]&&YB[k]>Y[k]+lift)))R[k]=0} // l'emprise d'un trottoir n'est jamais de la route
  const cm=cell*mpu,rr=Math.max(2,Math.round(1.1/cm)),dMin=.45/cm,dMax=1.1/cm,SP=LAMP_SP/mpu,out=[],per=3/cm,inb=.7/cm,KP=LAMP_KEEP/mpu,DG={cand:0,droit:0,traverse:0,large:0,libre:0,seul:0,road:road.length,walk:walk.length,R:0,S:0,g:Dx+'x'+Dz};for(let q=0;q<n;q++){if(R[q])DG.R++;if(S[q])DG.S++}
+ LCTX={R,S,YS,Dx,Dz,cell,x0,z0,cm,rr,dMin,dMax,inv}; // gardé pour buildingLamps()
  const cs=SP,grid=new Map(),key=(a,b)=>(a+8192)*16384+(b+8192),add=p=>{const k=key(Math.floor(p.x/cs),Math.floor(p.z/cs)),l=grid.get(k);if(l)l.push(p);else grid.set(k,[p])};
  const far=(x,z,rp,ro)=>{const ci=Math.floor(x/cs),cj=Math.floor(z/cs);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=grid.get(key(ci+a,cj+b));if(l)for(const p of l){const r=p.t==='p'?rp:ro,ex=p.x-x,ez=p.z-z;if(ex*ex+ez*ez<r*r)return false}}return true};
  have.forEach(p=>add({x:p.x,z:p.z,t:'o'}));
@@ -1210,6 +1211,47 @@ function fillLamps(o,have,mpu){
   if(!c||dm<dMin||dm>dMax)continue;const x=x0+(i+.5)*cell,z=z0+(j+.5)*cell;if(!far(x,z,SP,KP))continue;const l=Math.hypot(sx,sz)||1,a=1/mpu;
   out.push({x,z,y:YS[k],hm:LAMP_H,ax:sx/l*a,az:sz/l*a});add({x,z,t:'p'});DG.seul++;if(out.length>800)break}}
  LAMPDIAG=' [routes '+DG.road+' trottoirs '+DG.walk+' grille '+DG.g+' casesR '+DG.R+' casesS '+DG.S+' · bordures '+DG.cand+' · droites '+DG.droit+' · traversée '+DG.traverse+' · rue 8-45 m '+DG.large+' · paires '+DG.libre+' · coins '+DG.coin+' · seuls '+DG.seul+']';console.log('[lampadaires]',LAMPDIAG);return out}
+// ===== Lampadaires de bâtiment : 1 lampadaire au milieu de CHAQUE côté d'un bâtiment précis (le côté qui en a déjà un garde le sien) =====
+const BLD_LAMPS=[{name:'Object_62_62',parent:'CityGen_Buildings001_2_56',mesh:'Object_122'}]; // bâtiment visé (nom du groupe · parent · mesh de repli si le groupe est trop grand)
+let LCTX=null;
+function buildingLamps(o,have,mpu){
+ const C=LCTX;if(!C)return [];
+ const out=[],U=1/mpu,Rr=C.rr,tmp=new THREE.Box3();
+ const find=(nm,par)=>{let f=null;o.traverse(c=>{if(!f&&c.name===nm&&(!par||(c.parent&&c.parent.name===par)))f=c});return f};
+ const boxOf=n=>{tmp.setFromObject(n);return tmp.clone().applyMatrix4(C.inv)};
+ const lampAt=(x,z,r)=>{const r2=r*r*U*U;for(const q of have)if((q.x-x)**2+(q.z-z)**2<r2)return true;for(const q of out)if((q.x-x)**2+(q.z-z)**2<r2)return true;return false};
+ for(const B of BLD_LAMPS){
+  let node=find(B.name,B.parent)||find(B.name,null);
+  if(!node){console.warn('[lampadaires bâtiment] introuvable :',B.name);continue}
+  let bb=boxOf(node);
+  if((bb.max.x-bb.min.x)*mpu>170||(bb.max.z-bb.min.z)*mpu>170){const m=B.mesh&&find(B.mesh,null);if(m)bb=boxOf(m)}
+  const sides=[{n:'est',dx:1,dz:0},{n:'ouest',dx:-1,dz:0},{n:'sud',dx:0,dz:1},{n:'nord',dx:0,dz:-1}];
+  for(const sd of sides){const px=-sd.dz,pz=sd.dx;sd.px=px;sd.pz=pz;
+   sd.edge=sd.dx>0?bb.max.x:sd.dx<0?-bb.min.x:sd.dz>0?bb.max.z:-bb.min.z; // position du bord dans le sens « dehors »
+   sd.t0=sd.dx?bb.min.z:bb.min.x;sd.t1=sd.dx?bb.max.z:bb.max.x;sd.has=false}
+  // quel côté a déjà un lampadaire ? (le lampadaire le plus « dehors » par rapport au bâtiment décide)
+  for(const q of have){const d=[q.x-bb.max.x,bb.min.x-q.x,q.z-bb.max.z,bb.min.z-q.z];let k=0;for(let i=1;i<4;i++)if(d[i]>d[k])k=i;
+   const sd=sides[k],dm=d[k]*mpu,t=sd.dx?q.z:q.x;if(dm<-8||dm>32||t<sd.t0-10*U||t>sd.t1+10*U)continue;sd.has=true}
+  const cmU=C.cell; // taille d'une case (unités du modèle)
+  const isW=(i,j)=>i>=0&&j>=0&&i<C.Dx&&j<C.Dz&&C.S[j*C.Dx+i]&&!C.R[j*C.Dx+i];
+  const curb=(i,j,dx,dz)=>{if(!isW(i,j))return null;let sx=0,sz=0,c=0,dm=1e9;
+   for(let b=-Rr;b<=Rr;b++)for(let a=-Rr;a<=Rr;a++){const ii=i+a,jj=j+b;if(ii<0||jj<0||ii>=C.Dx||jj>=C.Dz)continue;if(C.R[jj*C.Dx+ii]){sx+=a;sz+=b;c++;const d=Math.hypot(a,b);if(d<dm)dm=d}}
+   if(!c||dm<C.dMin||dm>C.dMax)return null;const l=Math.hypot(sx,sz)||1;if((sx*dx+sz*dz)/l<.3)return null;return [sx/l,sz/l]};
+  const diag=[];
+  for(const sd of sides){
+   if(sd.has){diag.push(sd.n+' : déjà un lampadaire');continue}
+   const mid=(sd.t0+sd.t1)/2,half=(sd.t1-sd.t0)/2,step=3*U;let best=null;
+   for(let k=0;k*step<=half*.9&&!best;k++)for(const sg of (k?[1,-1]:[1])){
+    const t=mid+sg*k*step;
+    // on part de l'intérieur du bâtiment et on avance vers la rue : première bordure de trottoir (route de l'autre côté)
+    for(let m=-14*U;m<=34*U&&!best;m+=cmU*.5){
+     const e=sd.dx>0?bb.max.x:sd.dx<0?bb.min.x:sd.dz>0?bb.max.z:bb.min.z,
+           x=sd.dx?e+sd.dx*m:t,z=sd.dx?t:e+sd.dz*m,
+           i=Math.floor((x-C.x0)/C.cell),j=Math.floor((z-C.z0)/C.cell),a=curb(i,j,sd.dx,sd.dz);
+     if(a&&!lampAt(x,z,7)){best={x:C.x0+(i+.5)*C.cell,z:C.z0+(j+.5)*C.cell,y:C.YS[j*C.Dx+i],ax:a[0]*U,az:a[1]*U}}}}
+   if(best){out.push({x:best.x,z:best.z,y:best.y,hm:LAMP_H,ax:best.ax,az:best.az});diag.push(sd.n+' : +1')}else diag.push(sd.n+' : pas de trottoir trouvé')}
+  console.log('[lampadaires bâtiment]',B.name,'· taille',((bb.max.x-bb.min.x)*mpu).toFixed(0)+'×'+((bb.max.z-bb.min.z)*mpu).toFixed(0)+' m ·',diag.join(' · '))}
+ return out}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
  o.updateMatrixWorld(true);
@@ -1291,6 +1333,7 @@ function start(o){
  // Objets supprimés définitivement (par nom exact) : retirés du modèle AVANT la création des 3x3 tuiles, donc partout
  let LPOS=[];try{LPOS=collectLamps(o,s0*uf)}catch(e){console.warn('Lampadaires',e)}
  let NFILL=0;try{const E=fillLamps(o,LPOS,s0*uf);NFILL=E.length;LPOS=LPOS.concat(E)}catch(e){console.warn('Remplissage lampadaires',e);LAMPDIAG=' [ERREUR remplissage : '+e.message+']'}
+ try{const E2=buildingLamps(o,LPOS,s0*uf);NFILL+=E2.length;LPOS=LPOS.concat(E2)}catch(e){console.warn('Lampadaires du bâtiment',e)}
  const ND=(()=>{const del=[];o.traverse(c=>{if(c.isMesh&&(KILL.includes(c.name)||KILLRE.test(c.name||'')||(()=>{const ms=[].concat(c.material).filter(Boolean);return false})()))del.push(c)});
   del.forEach(c=>{if(c.geometry)c.geometry.dispose();c.parent&&c.parent.remove(c)});return del.length})();
   const AW=planAwnings(o,s0*uf);
@@ -1323,8 +1366,22 @@ INTERIORS.api.attach({THREE,topAt,cityStats,scene,cam,renderer:r,P,ground,npcGro
  getView:()=>({yaw,pitch,dist:wantDist}),setView:(y,p,d)=>{yaw=y;pitch=p;wantDist=d;camDist=d}});
 // ===== Boucle =====
 onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
+// ===== Gouverneur de performance (jour ET nuit) : si le jeu passe sous ~36 i/s, il baisse petit à petit les effets les plus gourmands ; il remonte tout seul au retour du jour =====
+const PERF={lvl:0,ema:0,cool:0,night:false},PERF_PR=[1.5,1.25,1.05,.9],PERF_LF=[320,260,200,150],PERF_WF=[700,520,380,260];
+function perfApply(){const l=PERF.lvl;
+ r.setPixelRatio(Math.min(devicePixelRatio||1,PERF_PR[l]));
+ LAMPU.uLampFar.value=PERF_LF[l];WINK.uFar.value=PERF_WF[l];
+ if(veilMat)veilMat.visible=l<1;      // voile diffus des lampadaires (gros sprites : très coûteux en remplissage)
+ if(poolIm)poolIm.visible=l<3}        // taches de lumière additives au sol
+function perfStep(raw,now){
+ if(!(raw>0&&raw<.25))return;
+ PERF.ema=PERF.ema?PERF.ema+(raw-PERF.ema)*.04:raw;
+ const night=TOD.lamp>.05||WIN.value>.05;
+ if(now<PERF.cool)return;
+ if(PERF.ema>.028&&PERF.lvl<3){PERF.lvl++;if(night)PERF.night=true;perfApply();PERF.cool=now+3;PERF.ema=0}
+ else if(!night&&PERF.night){PERF.night=false;if(PERF.lvl>0){PERF.lvl=0;perfApply();PERF.cool=now+3;PERF.ema=0}}}
 let tPrev=performance.now()/1000;
-(function loop(){requestAnimationFrame(loop);const now=performance.now()/1000,dt=Math.min(.05,now-tPrev);tPrev=now;
+(function loop(){requestAnimationFrame(loop);const now=performance.now()/1000,raw=now-tPrev,dt=Math.min(.05,raw);tPrev=now;
  if(MAP){
   const m=Math.min(1,Math.hypot(jx,jy));
   if(m>0){const fx=-Math.sin(yaw),fz=-Math.cos(yaw),rx=Math.cos(yaw),rz=-Math.sin(yaw);
@@ -1337,8 +1394,8 @@ let tPrev=performance.now()/1000;
   if(!INTERIORS.api.active)npcs.forEach(n=>updateNPC(n,dt));updateCam(dt,now);INTERIORS.api.frame(dt,now);
   }
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
- todStep(dt,now);
+ todStep(dt,now);perfStep(raw,now);
  INTERIORS.api.light(sun,hemi);
- tileCull();shAdapt();r.shadowMap.needsUpdate=!MAP||SH_K===1||((++_shF)%SH_K===0);
+ tileCull();shAdapt();const kk=sun.intensity<.3?Math.max(SH_K,3):SH_K;r.shadowMap.needsUpdate=!MAP||kk===1||((++_shF)%kk===0);
  try{r.render(scene,cam)}catch(e){if(!restoreTrees(e)){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
 </script></body></html>
