@@ -152,7 +152,7 @@ function applyTOD(now){
 // 1) Chaque texture de façade est analysée une fois : les vitres (zones sombres rectangulaires) sont repérées une par une et reçoivent un identifiant → « carte des fenêtres ».
 // 2) Le shader allume les fenêtres UNE PAR UNE (chacune a son propre seuil) quand la nuit tombe, avec sa propre couleur et sa propre intensité.
 const GLASSRE=/glass|window|vitre|fen[eê]tre/i;
-const WINK={uGain:{value:0.5},uMax:{value:0.7},uGy:{value:-1e4},uFar:{value:700}}; // uGy = altitude du sol (fenêtres de repli : seulement au-dessus du rez-de-chaussée)
+const WINK={uGain:{value:0.5},uMax:{value:0.3},uGy:{value:-1e4},uFar:{value:700}}; // uGy = altitude du sol (fenêtres de repli : seulement au-dessus du rez-de-chaussée)
  // uGain = intensité des fenêtres (baisse si encore trop fort) · uMax = part maximale de fenêtres allumées en pleine nuit
 const WINT={value:0};
 // Cherche les vitres dans une texture de façade : zones sombres rectangulaires (même si des croisillons clairs les coupent).
@@ -200,7 +200,7 @@ const WINFUNCS='uniform float uWin;uniform float uTime;uniform float uMode;unifo
  'float h31(vec3 p){p=fract(p*0.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}';
 // uMode : 0 = rien · 1 = carte des fenêtres (texture) · 2 = texture sans carte (zones sombres, repli) · 3 = vitre unie (sans texture)
 const WING0=3.0,WING1=5.5; // hauteur (m) au-dessus du sol : en dessous de WING0 aucune fenêtre allumée, au-dessus de WING1 plein effet
-const WINGLSL='float wdist=distance(vWP,cameraPosition);if(uMode>0.5&&uWin>0.002&&wdist<uWFar){'+
+const WINGLSL='float wdist=distance(vWP,cameraPosition);if(uMode>0.5&&uWin>0.002&&wdist<uWFar&&vWP.y<uGy+42.0){'+
  'float wl=1.0-smoothstep(0.3,0.6,abs(normalize(vWN).y));'+                      // seulement les murs verticaux
  'float cov=1.0,id=0.5,lx=0.5,ly=0.5;bool got=false;\n'+
  '#ifdef USE_MAP\n'+
@@ -210,7 +210,7 @@ const WINGLSL='float wdist=distance(vWP,cameraPosition);if(uMode>0.5&&uWin>0.002
  'float lum=dot(diffuseColor.rgb,vec3(0.2126,0.7152,0.0722));cov=(uMode>2.5)?1.0:1.0-smoothstep(0.02,0.08,lum);}'+
  'float gate=smoothstep(uGy+'+WING0.toFixed(1)+',uGy+'+WING1.toFixed(1)+',vWP.y);'+ // rez-de-chaussée (tous les blocs) : jamais de fenêtre allumée
  
- 'float lit=smoothstep(id,id+0.06,uWin*uMax)*gate;'+                                  // allumée quand « la nuit » dépasse son seuil
+ 'float lit=smoothstep(id,id+0.06,uWin*uMax)*gate*(1.0-smoothstep(uGy+24.0,uGy+42.0,vWP.y));'+                                  // allumée quand « la nuit » dépasse son seuil
  'float h2=h31(vec3(id*91.7,3.1,7.7)),h3=h31(vec3(id*13.1,9.3,1.7));'+
  'float tv=step(0.91,h2);'+                                                      // ~9 % : lumière bleutée d\'écran
  'vec3 col=mix(mix(vec3(1.0,0.50,0.17),vec3(1.0,0.74,0.40),min(1.0,h2*1.1)),vec3(0.55,0.72,1.0),tv);'+
@@ -476,13 +476,13 @@ let box0=null,s0=1,uf=1,MAP=null,selBox=null;
 // 2) les tuiles très lointaines (> TC_SHADOW m) ne projettent plus d'ombre (leurs meshes restent affichés normalement)
 // ===== Ombres adaptatives (mobile) : l'appareil mesure sa fluidité et allège les ombres tout seul si besoin, sans saccade ni clignotement =====
 // [taille de la carte d'ombre, rayon couvert autour du joueur (m), recalcul toutes les N images (toujours 1 : ombre recalculée à chaque image)]
-const SH_T=[[2048,90,1],[1024,70,1],[1024,56,1],[512,44,1]];
+const SH_T=[[2048,80,1]]; // une seule qualité : plus aucune baisse automatique (c'est elle qui faisait sauter les ombres)
 let SH_Q=-1,SH_N=2048,SH_R=90,SH_K=1,_shF=0,_ftE=0,_ftT=0,_ftN=0;
 function shApply(q){SH_Q=q;const t=SH_T[q];SH_N=t[0];SH_R=t[1];SH_K=t[2];const sc=sun.shadow.camera;sc.left=sc.bottom=-SH_R;sc.right=sc.top=SH_R;sc.updateProjectionMatrix();
  if(sun.shadow.mapSize.x!==SH_N){sun.shadow.mapSize.set(SH_N,SH_N);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null}}}
 function shAdapt(){if(SH_Q<0||!MAP||!TILECULL)return;const n=performance.now(),d=n-_ftT;_ftT=n;if(d<=0||d>250)return;
  _ftE=_ftE?_ftE+(d-_ftE)*.03:d;if(++_ftN>240&&_ftE>25&&SH_Q<SH_T.length-1){shApply(SH_Q+1);_ftE=0;_ftN=0}} // < 40 i/s pendant ~4 s : on passe au niveau d'ombre suivant (jamais de retour en arrière)
-if(IS_MOBILE){r.shadowMap.type=THREE.PCFShadowMap;sun.shadow.radius=1.6;shApply(1)} // mobile : filtre d'ombre 4× moins coûteux + carte 1024
+if(IS_MOBILE){shApply(0)} // mobile : même filtre doux (PCFSoft) que sur ordinateur, carte 2048 → bords lissés, sans escalier // mobile : filtre d'ombre 4× moins coûteux + carte 1024
 let _bootDone=false;
 function bootSet(t,p){const m=document.getElementById('bootM'),b=document.getElementById('bootBar');if(m)m.textContent=t;if(b)b.style.width=Math.round(Math.min(1,p)*100)+'%'}
 function bootHide(){if(_bootDone)return;_bootDone=true;const e=document.getElementById('boot');if(!e)return;e.style.opacity=0;e.style.pointerEvents='none';setTimeout(()=>e.remove(),900)}
@@ -940,7 +940,7 @@ const MK={
  pmrEvery:3,     // une place PMR toutes les N rues (0 = aucune)
  tact:true,      // dalles podotactiles jaunes au bout des passages
  arrows:true,    // flèches de direction avant les carrefours
- yOff:.035       // hauteur des lignes au-dessus du goudron (m) : évite le scintillement
+ yOff:.06       // hauteur des lignes au-dessus du goudron (m) : évite le scintillement
 };
 function MK_close(R,Dx,Dz){
  const A=new Uint8Array(R.length),B=new Uint8Array(R.length);
@@ -1087,7 +1087,7 @@ function reskinLines(o,mpu){let n=0;const tl=new THREE.TextureLoader(),T={};
   const pa=c.geometry.attributes.position,uv=new Float32Array(pa.count*2),k=mpu/TILE;
   for(let i=0;i<pa.count;i++){uv[i*2]=pa.getX(i)*k;uv[i*2+1]=pa.getZ(i)*k}
   c.geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
-  const nm=ms.map(m=>{const q=m.clone();q.map=/secondary/i.test(m.name||'')?T.y:T.w;q.color.set(0xffffff);q.transparent=true;q.alphaTest=.03;q.depthWrite=false;q.side=THREE.DoubleSide;q.polygonOffset=true;q.polygonOffsetFactor=-8;q.polygonOffsetUnits=-8;q.needsUpdate=true;return q});
+  const nm=ms.map(m=>{const q=m.clone();q.map=/secondary/i.test(m.name||'')?T.y:T.w;q.color.set(0xffffff);q.transparent=true;q.alphaTest=.03;q.depthWrite=false;q.side=THREE.DoubleSide;q.polygonOffset=true;q.polygonOffsetFactor=-10;q.polygonOffsetUnits=-20;q.needsUpdate=true;return q});
   c.material=Array.isArray(c.material)?nm:nm[0];c.userData.decal=true;c.renderOrder=2;n++});
  console.log('[traits] retexturés :',n);return n}
 
@@ -1273,7 +1273,7 @@ function buildMarkings0(o,sz,s){
  G.pct=Math.round(100*cn/n);if(cn<500)return 'goudron introuvable ('+cn+' cases)';G.baseY=sy/cn;
  const P=MK_plan(G),hf=(x,z)=>MK_hAt(G,G.R,G.Y,x,z,G.baseY),yo=MK.yOff/s,aniso=Math.min(8,r.capabilities.getMaxAnisotropy());
  const tl=new THREE.TextureLoader(),lineTex=src=>{const t=tl.load(src);t.encoding=THREE.sRGBEncoding;t.wrapS=THREE.ClampToEdgeWrapping;t.wrapT=THREE.MirroredRepeatWrapping;t.anisotropy=aniso;return t};
- const mat=(map,name)=>new THREE.MeshStandardMaterial({map,transparent:true,alphaTest:.03,roughness:.7,metalness:0,envMapIntensity:1.1,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2,name});
+ const mat=(map,name)=>new THREE.MeshStandardMaterial({map,transparent:true,alphaTest:.03,roughness:.7,metalness:0,envMapIntensity:1.1,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-6,polygonOffsetUnits:-12,name});
  const grp=new THREE.Group();grp.name='Marquages';let tri=0;
  const add=(g,material,name)=>{if(!g.idx.length)return;const G2=new THREE.BufferGeometry();G2.setAttribute('position',new THREE.BufferAttribute(g.pos,3));G2.setAttribute('normal',new THREE.BufferAttribute(g.nor,3));
   G2.setAttribute('uv',new THREE.BufferAttribute(g.uv,2));G2.setIndex(new THREE.BufferAttribute(g.idx,1));const me=new THREE.Mesh(G2,material);me.name=name;me.userData.decal=true;me.frustumCulled=false;me.renderOrder=2;grp.add(me);tri+=g.idx.length/3};
@@ -1367,9 +1367,9 @@ INTERIORS.api.attach({THREE,topAt,cityStats,scene,cam,renderer:r,P,ground,npcGro
 // ===== Boucle =====
 onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
 // ===== Gouverneur de performance (jour ET nuit) : si le jeu passe sous ~36 i/s, il baisse petit à petit les effets les plus gourmands ; il remonte tout seul au retour du jour =====
-const PERF={lvl:0,ema:0,cool:0,night:false},PERF_PR=[1.5,1.25,1.05,.9],PERF_LF=[320,260,200,150],PERF_WF=[700,520,380,260];
+const PERF={lvl:0,ema:0,cool:0,warm:performance.now()/1000+20,night:false},PERF_PR=[1.5,1.5,1.5,1.5],PERF_LF=[320,260,200,150],PERF_WF=[700,520,380,260];
 function perfApply(){const l=PERF.lvl;
- r.setPixelRatio(Math.min(devicePixelRatio||1,PERF_PR[l]));
+ {const pr=Math.min(devicePixelRatio||1,PERF_PR[l]);if(Math.abs(pr-r.getPixelRatio())>.01)r.setPixelRatio(pr)}
  LAMPU.uLampFar.value=PERF_LF[l];WINK.uFar.value=PERF_WF[l];
  if(veilMat)veilMat.visible=l<1;      // voile diffus des lampadaires (gros sprites : très coûteux en remplissage)
  if(poolIm)poolIm.visible=l<3}        // taches de lumière additives au sol
@@ -1377,8 +1377,8 @@ function perfStep(raw,now){
  if(!(raw>0&&raw<.25))return;
  PERF.ema=PERF.ema?PERF.ema+(raw-PERF.ema)*.04:raw;
  const night=TOD.lamp>.05||WIN.value>.05;
- if(now<PERF.cool)return;
- if(PERF.ema>.028&&PERF.lvl<3){PERF.lvl++;if(night)PERF.night=true;perfApply();PERF.cool=now+3;PERF.ema=0}
+ if(now<PERF.cool||now<PERF.warm)return;
+ if(PERF.ema>.028&&PERF.lvl<3){PERF.lvl++;if(night)PERF.night=true;perfApply();PERF.cool=now+8;PERF.ema=0}
  else if(!night&&PERF.night){PERF.night=false;if(PERF.lvl>0){PERF.lvl=0;perfApply();PERF.cool=now+3;PERF.ema=0}}}
 let tPrev=performance.now()/1000;
 (function loop(){requestAnimationFrame(loop);const now=performance.now()/1000,raw=now-tPrev,dt=Math.min(.05,raw);tPrev=now;
@@ -1396,6 +1396,6 @@ let tPrev=performance.now()/1000;
  else{cam.position.set(0,60,120);cam.lookAt(0,0,0)}
  todStep(dt,now);perfStep(raw,now);
  INTERIORS.api.light(sun,hemi);
- tileCull();shAdapt();const kk=sun.intensity<.3?Math.max(SH_K,3):SH_K;r.shadowMap.needsUpdate=!MAP||kk===1||((++_shF)%kk===0);
+ tileCull();shAdapt();r.shadowMap.needsUpdate=!MAP||SH_K===1||((++_shF)%SH_K===0);
  try{r.render(scene,cam)}catch(e){if(!restoreTrees(e)){msg.style.opacity=1;msg.textContent='Erreur de rendu : '+(e&&e.message)}}})();
 </script></body></html>
