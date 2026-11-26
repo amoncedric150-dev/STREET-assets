@@ -23,6 +23,16 @@ button{background:#000a;color:#fff;border:1px solid #fff4;border-radius:10px;pad
 <div id="top"><button id="bm">Échelle −</button><button id="bp">Échelle +</button><button id="bs">Départ</button><button id="clk">12:00</button><button id="bpz">⏸</button><button id="bnx">Phase ▶</button><button id="be1">Lumière −</button><button id="be2">Lumière +</button><button id="bmk">Lignes ?</button><button id="bsh">Ombres : oui</button><button id="bi">Inspecter</button></div>
 <div id="insp"><pre id="ii">Touche un objet de la ville pour voir son nom.</pre><div class="ir"><button id="ih">Masquer</button><button id="in">Même nom</button><button id="im">Même matériau</button></div><div class="ir"><button id="iu">Annuler</button><button id="il">Liste</button><button id="il2">Lampe</button><button id="iw">Fenêtre</button></div><textarea id="it" readonly></textarea></div>
 <div id="joy"><div id="knob"></div></div>
+<script>/* cache persistant (Service Worker + Cache API) : purement additif — si quelque chose échoue, le jeu se charge comme avant */
+(function(){try{
+ if(!('serviceWorker' in navigator)||!('caches' in window))return;
+ if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1')return;
+ navigator.serviceWorker.register('sw.js').catch(function(e){console.warn('[cache] Service Worker non enregistré',e)});
+ try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(function(){})}catch(e){}
+ /* vider le cache à la main (console) : nyCacheClear() */
+ window.nyCacheClear=function(){return caches.keys().then(function(k){return Promise.all(k.filter(function(n){return n.indexOf('ny-cache-')===0}).map(function(n){return caches.delete(n)}))})};
+}catch(e){console.warn('[cache]',e)}})();
+</script>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
 <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/DRACOLoader.js"></script>
