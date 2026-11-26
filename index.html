@@ -1361,7 +1361,8 @@ function placeBins(o,L,mpu){
 const HYD_URLS=['fire_hydrant%202.glb','fire_hydrant.glb'].map(n=>R2+'Trottoir/Bombons%20d%E2%80%99eau/'+n);
 const HYD_HM=[.85,.85];   // hauteur voulue (m) de chaque modèle : change ici si trop grand / petit
 const HYD_ROT=[0,0];      // rotation de correction (radians) si un modèle ne regarde pas vers la route (ex. Math.PI/2, Math.PI)
-const HYD_SP=55,HYD_MAX_VERTS=600000; // espacement mini entre deux bouches (m) · garde-fou de sommets
+const HYD_SP=25,HYD_MAX_VERTS=1200000; // espacement mini entre deux bouches (m) · garde-fou de sommets (avant : 55 m et 600000 → bouches rares)
+const HYD_METAL=.15;     // métal maximum des bouches (0 = peinture mate, 1 = chrome) : un matériau trop métallique reflète le ciel bleu et change la couleur ; mets 1 pour garder le métal du GLB
 let HYDGLB=[null,null],HYDDIAG='non exécuté',HYDERR=[];
 function loadHydrantModels(){return Promise.all(HYD_URLS.map((u,i)=>new Promise(res=>{try{binLoader.load(u,g=>{HYDGLB[i]=g.scene;res()},undefined,e=>{HYDERR.push(i+1);console.warn('Bouche GLB '+(i+1)+' : échec de chargement',u,e);res()})}catch(e){HYDERR.push(i+1);console.warn(e);res()}})))}
 // fusionne des modèles GLB en quelques gros objets (même méthode que les lampadaires / poubelles) : pts = [{x,z,y,rot}]
@@ -1382,12 +1383,13 @@ function bakeInstances(o,glbs,pts,hm,rotOff,name,maxV,U){
  mods.forEach((md,mi)=>{const list=groups[mi];if(!list.length)return;
   md.subs.forEach(sb=>{const g=sb.g,pa=g.attributes.position,na=g.attributes.normal,ua=g.attributes.uv,ix=g.index,nv0=pa.count,ni=ix?ix.count:nv0,K=list.length;
    const P=new Float32Array(nv0*K*3),Nn=na?new Float32Array(nv0*K*3):null,Uu=ua?new Float32Array(nv0*K*2):null,I=new Uint32Array(ni*K);let o3=0,o2=0,oi=0,base=0;
+   const ca=g.attributes.color,Cc=ca?new Float32Array(nv0*K*ca.itemSize):null,u2=g.attributes.uv2,U2=u2?new Float32Array(nv0*K*2):null;let oc=0,ou=0; // couleurs de sommets et 2e UV du modèle : conservés (avant, ils étaient perdus → couleur fausse)
    for(const p of list){const k=(md.hm*(.96+.08*((p._h>>>8&255)/255))*U)/md.H;
     T0.makeTranslation(-md.cx,-md.mn,-md.cz);S1.makeScale(k,k,k);R1.makeRotationY((p.rot||0)+md.ro);T1.makeTranslation(p.x,p.y-.01*U,p.z);
     W.copy(T1).multiply(R1).multiply(S1).multiply(T0).multiply(sb.M);N3.getNormalMatrix(W);
-    for(let i=0;i<nv0;i++){v.fromBufferAttribute(pa,i).applyMatrix4(W);P[o3]=v.x;P[o3+1]=v.y;P[o3+2]=v.z;if(Nn){nv.fromBufferAttribute(na,i).applyMatrix3(N3).normalize();Nn[o3]=nv.x;Nn[o3+1]=nv.y;Nn[o3+2]=nv.z}o3+=3;if(Uu){Uu[o2++]=ua.getX(i);Uu[o2++]=ua.getY(i)}}
+    for(let i=0;i<nv0;i++){v.fromBufferAttribute(pa,i).applyMatrix4(W);P[o3]=v.x;P[o3+1]=v.y;P[o3+2]=v.z;if(Nn){nv.fromBufferAttribute(na,i).applyMatrix3(N3).normalize();Nn[o3]=nv.x;Nn[o3+1]=nv.y;Nn[o3+2]=nv.z}o3+=3;if(Uu){Uu[o2++]=ua.getX(i);Uu[o2++]=ua.getY(i)}if(Cc){for(let q=0;q<ca.itemSize;q++)Cc[oc++]=ca.getComponent(i,q)}if(U2){U2[ou++]=u2.getX(i);U2[ou++]=u2.getY(i)}}
     for(let i=0;i<ni;i++)I[oi++]=(ix?ix.getX(i):i)+base;base+=nv0}
-   const G=new THREE.BufferGeometry();G.setAttribute('position',new THREE.BufferAttribute(P,3));if(Nn)G.setAttribute('normal',new THREE.BufferAttribute(Nn,3));if(Uu)G.setAttribute('uv',new THREE.BufferAttribute(Uu,2));G.setIndex(new THREE.BufferAttribute(I,1));
+   const G=new THREE.BufferGeometry();G.setAttribute('position',new THREE.BufferAttribute(P,3));if(Nn)G.setAttribute('normal',new THREE.BufferAttribute(Nn,3));if(Uu)G.setAttribute('uv',new THREE.BufferAttribute(Uu,2));if(Cc)G.setAttribute('color',new THREE.BufferAttribute(Cc,ca.itemSize));if(U2)G.setAttribute('uv2',new THREE.BufferAttribute(U2,2));G.setIndex(new THREE.BufferAttribute(I,1));
    if(!Nn)G.computeVertexNormals();
    const me=new THREE.Mesh(G,sb.mat);me.name=name+'_'+mi;me.userData.noLamp=true;grp.add(me)})});
  grp.userData.noLamp=true;o.add(grp);return groups.reduce((a,l)=>a+l.length,0)}
@@ -1416,6 +1418,7 @@ function placeHydrants(o,L,mpu){
   const p={x,z,y:C.YS[c.j*Dx+c.i],rot:Math.atan2(c.nx,c.nz)};pts.push(p);const k=Math.floor(x/HS)+','+Math.floor(z/HS);if(hg.has(k))hg.get(k).push(p);else hg.set(k,[p])}
  HYDDIAG='bordures '+cand.length+' · emplacements '+pts.length;
  if(!pts.length)return 0;
+ try{HYDGLB.forEach(sc=>{if(!sc)return;sc.traverse(c=>{if(!c.isMesh||!c.material)return;const arr=[].concat(c.material).map(m=>{if(!m||!m.isMeshStandardMaterial||m.metalnessMap||m.metalness<=HYD_METAL)return m;const k=m.clone();k.metalness=HYD_METAL;return k});c.material=Array.isArray(c.material)?arr:arr[0]})})}catch(e){console.warn('Bouches : métal',e)} // copies des matériaux : seules les bouches sont touchées
  const n=bakeInstances(o,HYDGLB,pts,HYD_HM,HYD_ROT,'Bouches_GLB',HYD_MAX_VERTS,U);
  HYDDIAG+=' · GLB chargés '+HYDGLB.filter(Boolean).length+'/2'+(HYDERR.length?' (échec n°'+HYDERR.join(',')+')':'');console.log('[bouches d\'incendie]',HYDDIAG,'posées',n);return n}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
