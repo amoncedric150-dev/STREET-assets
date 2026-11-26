@@ -1085,7 +1085,7 @@ function reskinLines(o,mpu){let n=0;const tl=new THREE.TextureLoader(),T={};
   const pa=c.geometry.attributes.position,uv=new Float32Array(pa.count*2),k=mpu/TILE;
   for(let i=0;i<pa.count;i++){uv[i*2]=pa.getX(i)*k;uv[i*2+1]=pa.getZ(i)*k}
   c.geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
-  const nm=ms.map(m=>{const q=m.clone();q.map=/secondary/i.test(m.name||'')?T.y:T.w;q.color.set(0xffffff);q.transparent=false;q.alphaTest=0;q.polygonOffset=true;q.polygonOffsetFactor=-2;q.polygonOffsetUnits=-2;q.needsUpdate=true;return q});
+  const nm=ms.map(m=>{const q=m.clone();q.map=/secondary/i.test(m.name||'')?T.y:T.w;q.color.set(0xffffff);q.transparent=true;q.alphaTest=.03;q.depthWrite=false;q.side=THREE.DoubleSide;q.polygonOffset=true;q.polygonOffsetFactor=-2;q.polygonOffsetUnits=-2;q.needsUpdate=true;return q});
   c.material=Array.isArray(c.material)?nm:nm[0];c.userData.decal=true;n++});
  console.log('[traits] retexturés :',n);return n}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
