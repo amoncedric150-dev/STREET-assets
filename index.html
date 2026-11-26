@@ -1429,9 +1429,11 @@ const TL_ROT=[0,0];       // rotation de correction (radians) si un modèle ne r
 const TL_SP=110;          // distance mini (m) entre deux feux → plus grand = moins de feux
 const TL_KEEP=.4;         // part des coins de carrefour candidats (40 %) avant le tri par distance
 const TL_MAX_VERTS=600000;// garde-fou de sommets pour tous les feux
+const TL_ON=!/sansfeux/i.test(location.hash+location.search); // ajoute #sansfeux à l'adresse pour désactiver les feux (test en cas de plantage mémoire)
 let TLGLB=[null,null],TLDIAG='non exécuté',TLERR=[],TLPTS=[];
-function loadTrafficModels(){return Promise.all(TL_URLS.map((u,i)=>new Promise(res=>{try{binLoader.load(u,g=>{TLGLB[i]=g.scene;res()},undefined,e=>{TLERR.push(i+1);console.warn('Feu GLB '+(i+1)+' : échec de chargement',u,e);res()})}catch(e){TLERR.push(i+1);console.warn(e);res()}})))}
+function loadTrafficModels(){if(!TL_ON)return Promise.resolve();return Promise.all(TL_URLS.map((u,i)=>new Promise(res=>{try{binLoader.load(u,g=>{TLGLB[i]=g.scene;res()},undefined,e=>{TLERR.push(i+1);console.warn('Feu GLB '+(i+1)+' : échec de chargement',u,e);res()})}catch(e){TLERR.push(i+1);console.warn(e);res()}})))}
 function placeTrafficLights(o,L,mpu){
+ if(!TL_ON){TLDIAG='désactivés (#sansfeux)';return 0}
  const C=LCTX;if(!C){TLDIAG='carte routes/trottoirs indisponible';return 0}
  if(!TLGLB.some(Boolean)){TLDIAG='aucun GLB chargé (erreurs : '+(TLERR.join(',')||'?')+')';return 0}
  const corners=BINCORNERS||[];if(!corners.length){TLDIAG='aucun coin de carrefour';return 0}
