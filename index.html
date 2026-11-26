@@ -1173,7 +1173,7 @@ function fillLamps(o,have,mpu){
  TR.forEach(a=>MK_raster(a,G,R,Y));TW.forEach(a=>MK_raster(a,G,S,YS));
  // le goudron du modèle passe aussi sous les trottoirs et les bâtiments : tout ce qui est plus haut que la chaussée n'est PAS une route (comme pour les marquages)
  {const B=new Uint8Array(n),YB=new Float32Array(n);big.forEach(c=>MK_raster(tris(c),G,B,YB));const lift=.06/mpu;
-  for(let k=0;k<n;k++)if(R[k]&&((S[k]&&YS[k]>Y[k]+lift)||(B[k]&&YB[k]>Y[k]+lift)))R[k]=0}
+  for(let k=0;k<n;k++)if(R[k]&&(S[k]||(B[k]&&YB[k]>Y[k]+lift)))R[k]=0} // l'emprise d'un trottoir n'est jamais de la route
  const cm=cell*mpu,rr=Math.max(2,Math.round(1.1/cm)),dMin=.45/cm,dMax=1.1/cm,SP=LAMP_SP/mpu,out=[],per=3/cm,inb=.7/cm,DG={cand:0,droit:0,traverse:0,large:0,libre:0,seul:0,road:road.length,walk:walk.length,R:0,S:0,g:Dx+'x'+Dz};for(let q=0;q<n;q++){if(R[q])DG.R++;if(S[q])DG.S++}
  const cs=SP,grid=new Map(),key=(a,b)=>(a+8192)*16384+(b+8192),add=p=>{const k=key(Math.floor(p.x/cs),Math.floor(p.z/cs)),l=grid.get(k);if(l)l.push(p);else grid.set(k,[p])};
  const far=(x,z)=>{const ci=Math.floor(x/cs),cj=Math.floor(z/cs);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=grid.get(key(ci+a,cj+b));if(l)for(const p of l){const ex=p.x-x,ez=p.z-z;if(ex*ex+ez*ez<SP*SP)return false}}return true};
@@ -1302,7 +1302,7 @@ function start(o){
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
  msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés)';
- {const d=document.createElement('div');d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.75);color:#fff;font:11px/1.3 monospace;padding:4px 6px;pointer-events:none';d.textContent='LAMPADAIRES posés '+NLP+'/'+LPOS.length+' · modèles GLB chargés '+LAMPGLB.filter(Boolean).length+'/2'+LAMPDIAG;document.body.appendChild(d);setTimeout(()=>d.remove(),90000)}
+ {const d=document.createElement('div');d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.75);color:#fff;font:11px/1.3 monospace;padding:4px 6px;pointer-events:none';d.textContent='v8 · LAMPADAIRES posés '+NLP+'/'+LPOS.length+' · modèles GLB chargés '+LAMPGLB.filter(Boolean).length+'/2'+LAMPDIAG;document.body.appendChild(d);setTimeout(()=>d.remove(),90000)}
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,7000)}
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);loadLampModels().then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
