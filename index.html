@@ -1366,7 +1366,7 @@ const HYD_METAL=.15;     // métal maximum des bouches (0 = peinture mate, 1 = c
 let HYDGLB=[null,null],HYDDIAG='non exécuté',HYDERR=[];
 function loadHydrantModels(){return Promise.all(HYD_URLS.map((u,i)=>new Promise(res=>{try{binLoader.load(u,g=>{HYDGLB[i]=g.scene;res()},undefined,e=>{HYDERR.push(i+1);console.warn('Bouche GLB '+(i+1)+' : échec de chargement',u,e);res()})}catch(e){HYDERR.push(i+1);console.warn(e);res()}})))}
 // fusionne des modèles GLB en quelques gros objets (même méthode que les lampadaires / poubelles) : pts = [{x,z,y,rot}]
-function bakeInstances(o,glbs,pts,hm,rotOff,name,maxV,U){
+function bakeInstances(o,glbs,pts,hm,rotOff,name,maxV,U,flat){
  const mods=[];
  glbs.forEach((sc,idx)=>{if(!sc)return;sc.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(sc.matrixWorld).invert(),subs=[],v=new THREE.Vector3(),bb=new THREE.Box3();
   sc.traverse(c=>{if(c.isMesh&&c.geometry&&c.geometry.attributes.position)subs.push({g:c.geometry,mat:c.material,M:new THREE.Matrix4().copy(c.matrixWorld).premultiply(inv)})});
@@ -1384,7 +1384,7 @@ function bakeInstances(o,glbs,pts,hm,rotOff,name,maxV,U){
   md.subs.forEach(sb=>{const g=sb.g,pa=g.attributes.position,na=g.attributes.normal,ua=g.attributes.uv,ix=g.index,nv0=pa.count,ni=ix?ix.count:nv0,K=list.length;
    const P=new Float32Array(nv0*K*3),Nn=na?new Float32Array(nv0*K*3):null,Uu=ua?new Float32Array(nv0*K*2):null,I=new Uint32Array(ni*K);let o3=0,o2=0,oi=0,base=0;
    const ca=g.attributes.color,Cc=ca?new Float32Array(nv0*K*ca.itemSize):null,u2=g.attributes.uv2,U2=u2?new Float32Array(nv0*K*2):null;let oc=0,ou=0; // couleurs de sommets et 2e UV du modèle : conservés (avant, ils étaient perdus → couleur fausse)
-   for(const p of list){const k=(md.hm*(.96+.08*((p._h>>>8&255)/255))*U)/md.H;
+   for(const p of list){const k=(md.hm*(flat?1:.96+.08*((p._h>>>8&255)/255))*U)/md.H;
     T0.makeTranslation(-md.cx,-md.mn,-md.cz);S1.makeScale(k,k,k);R1.makeRotationY((p.rot||0)+md.ro);T1.makeTranslation(p.x,p.y-.01*U,p.z);
     W.copy(T1).multiply(R1).multiply(S1).multiply(T0).multiply(sb.M);N3.getNormalMatrix(W);
     for(let i=0;i<nv0;i++){v.fromBufferAttribute(pa,i).applyMatrix4(W);P[o3]=v.x;P[o3+1]=v.y;P[o3+2]=v.z;if(Nn){nv.fromBufferAttribute(na,i).applyMatrix3(N3).normalize();Nn[o3]=nv.x;Nn[o3+1]=nv.y;Nn[o3+2]=nv.z}o3+=3;if(Uu){Uu[o2++]=ua.getX(i);Uu[o2++]=ua.getY(i)}if(Cc){for(let q=0;q<ca.itemSize;q++)Cc[oc++]=ca.getComponent(i,q)}if(U2){U2[ou++]=u2.getX(i);U2[ou++]=u2.getY(i)}}
@@ -1416,11 +1416,66 @@ function placeHydrants(o,L,mpu){
  const near=(x,z)=>{const ci=Math.floor(x/HS),cj=Math.floor(z/HS);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=hg.get((ci+a)+','+(cj+b));if(l)for(const q of l)if((q.x-x)**2+(q.z-z)**2<HS*HS)return true}return false};
  for(const c of cand){const x=C.x0+(c.i+.5)*C.cell,z=C.z0+(c.j+.5)*C.cell;if(blocked(x,z)||near(x,z))continue;
   const p={x,z,y:C.YS[c.j*Dx+c.i],rot:Math.atan2(c.nx,c.nz)};pts.push(p);const k=Math.floor(x/HS)+','+Math.floor(z/HS);if(hg.has(k))hg.get(k).push(p);else hg.set(k,[p])}
- HYDDIAG='bordures '+cand.length+' · emplacements '+pts.length;
+ HYDDIAG='bordures '+cand.length+' · emplacements '+pts.length;HYDPTS=pts;
  if(!pts.length)return 0;
  try{HYDGLB.forEach(sc=>{if(!sc)return;sc.traverse(c=>{if(!c.isMesh||!c.material)return;const arr=[].concat(c.material).map(m=>{if(!m||!m.isMeshStandardMaterial||m.metalnessMap||m.metalness<=HYD_METAL)return m;const k=m.clone();k.metalness=HYD_METAL;return k});c.material=Array.isArray(c.material)?arr:arr[0]})})}catch(e){console.warn('Bouches : métal',e)} // copies des matériaux : seules les bouches sont touchées
  const n=bakeInstances(o,HYDGLB,pts,HYD_HM,HYD_ROT,'Bouches_GLB',HYD_MAX_VERTS,U);
  HYDDIAG+=' · GLB chargés '+HYDGLB.filter(Boolean).length+'/2'+(HYDERR.length?' (échec n°'+HYDERR.join(',')+')':'');console.log('[bouches d\'incendie]',HYDDIAG,'posées',n);return n}
+
+// ===== Bollards : rangées régulières au bord de la route, ENTRE deux lampadaires voisins (espacement identique, centré, comme à New York) =====
+const BOL_URL=R2+'Trottoir/Bollard/street_bollard.glb';
+const BOL_HM=[.95];          // hauteur (m) du bollard : change ici si trop grand / petit
+const BOL_ROT=[0];           // rotation de correction (radians) si le modèle est tourné
+const BOL_SP=2.5;            // espacement voulu (m) entre deux bollards (ajusté pour que la rangée soit parfaitement régulière)
+const BOL_MARGIN=3.5;        // distance (m) entre un lampadaire et le premier bollard
+const BOL_PAIR_MAX=60;       // deux lampadaires plus éloignés que ça ne sont pas reliés par une rangée
+const BOL_CORNER=6;          // pas de bollard à moins de X m d'un coin de carrefour (passages piétons)
+const BOL_METAL=.25;         // métal maximum (1 = garder celui du GLB)
+const BOL_MAX_VERTS=1200000; // garde-fou de sommets
+let BOLGLB=[null],BOLDIAG='non exécuté',BOLERR=[],HYDPTS=[];
+function loadBollardModel(){return new Promise(res=>{try{binLoader.load(BOL_URL,g=>{BOLGLB[0]=g.scene;res()},undefined,e=>{BOLERR.push(1);console.warn('Bollard GLB : échec de chargement',BOL_URL,e);res()})}catch(e){BOLERR.push(1);console.warn(e);res()}})}
+function placeBollards(o,L,mpu){
+ const C=LCTX;if(!C){BOLDIAG='carte routes/trottoirs indisponible';return 0}
+ if(!BOLGLB[0]){BOLDIAG='GLB non chargé';return 0}
+ if(L.length<2){BOLDIAG='pas assez de lampadaires';return 0}
+ const U=1/mpu,Dx=C.Dx,Dz=C.Dz,cell=C.cell,cm=C.cm,rw=Math.max(2,Math.round(1.8/cm)),dLim=1.8/cm;
+ // case valide = trottoir (pas route) avec la route à moins de ~1,8 m : on est bien le long de la bordure
+ const curbAt=(x,z)=>{const i=Math.floor((x-C.x0)/cell),j=Math.floor((z-C.z0)/cell);if(i<rw||j<rw||i>=Dx-rw||j>=Dz-rw)return -1;const k=j*Dx+i;if(!C.S[k]||C.R[k])return -1;
+  let dm=1e9;for(let b=-rw;b<=rw;b++)for(let a=-rw;a<=rw;a++){if(C.R[(j+b)*Dx+i+a]){const d=Math.hypot(a,b);if(d<dm)dm=d}}
+  return dm<=dLim?k:-1};
+ // grille des lampadaires
+ const maxD=BOL_PAIR_MAX*U,minD=(2*BOL_MARGIN+1.5)*U,cs=maxD,grid=new Map(),gk=(a,b)=>a+','+b;
+ L.forEach((p,i)=>{const k=gk(Math.floor(p.x/cs),Math.floor(p.z/cs)),l=grid.get(k);if(l)l.push(i);else grid.set(k,[i])});
+ const nearL=(x,z)=>{const ci=Math.floor(x/cs),cj=Math.floor(z/cs),out=[];for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const l=grid.get(gk(ci+a,cj+b));if(l)for(const i of l)out.push(i)}return out};
+ const pts=[],DG={paires:0,vues:0,traverse:0,intercale:0,bord:0,coin:0,bac:0,bouche:0,dbl:0};
+ const bg=new Map(),bkey=(x,z)=>Math.floor(x/(1.2*U))+','+Math.floor(z/(1.2*U));
+ const tooClose=(x,z,list,r)=>{const r2=r*r*U*U;for(const q of list)if((q.x-x)**2+(q.z-z)**2<r2)return true;return false};
+ for(let ia=0;ia<L.length;ia++){const A=L[ia];
+  for(const ib of nearL(A.x,A.z)){if(ib<=ia)continue;const B=L[ib];
+   const dx=B.x-A.x,dz=B.z-A.z,D=Math.hypot(dx,dz);if(D<minD||D>maxD)continue;DG.vues++;
+   const Dm=D*mpu,ux=dx/D,uz=dz/D;
+   // un autre lampadaire pile sur le trajet ? alors ce n'est pas deux voisins directs
+   let blocked=false;for(const ic of nearL(A.x,A.z)){if(ic===ia||ic===ib)continue;const C2=L[ic],t=((C2.x-A.x)*ux+(C2.z-A.z)*uz);if(t<=0||t>=D)continue;const pd=Math.abs((C2.x-A.x)*uz-(C2.z-A.z)*ux);if(pd<3.5*U){blocked=true;break}}
+   if(blocked){DG.intercale++;continue}
+   // la ligne droite entre les deux doit rester sur le bord du trottoir (sinon : rue à traverser, coin, etc.)
+   const ns=Math.max(2,Math.floor(Dm));let ok=0;for(let s2=1;s2<ns;s2++){const t=s2/ns;if(curbAt(A.x+dx*t,A.z+dz*t)>=0)ok++}
+   if(ok<(ns-1)*.92){DG.traverse++;continue}
+   const len=Dm-2*BOL_MARGIN;if(len<.5)continue;
+   const n=Math.max(1,Math.round(len/BOL_SP)+1),st=n>1?len/(n-1):0;DG.paires++;
+   const rot=Math.atan2(ux,uz);
+   for(let q=0;q<n;q++){const dist=n>1?BOL_MARGIN+q*st:Dm/2,t=dist/Dm,x=A.x+dx*t,z=A.z+dz*t;
+    const k=curbAt(x,z);if(k<0){DG.bord++;continue}
+    if(tooClose(x,z,BINCORNERS,BOL_CORNER)){DG.coin++;continue}
+    if(tooClose(x,z,BINPTS,1.3)){DG.bac++;continue}
+    if(tooClose(x,z,HYDPTS,1.6)){DG.bouche++;continue}
+    let dup=false;{const ci=Math.floor(x/(1.2*U)),cj=Math.floor(z/(1.2*U));for(let a=-1;a<=1&&!dup;a++)for(let b=-1;b<=1&&!dup;b++){const l=bg.get((ci+a)+','+(cj+b));if(l)for(const w of l)if((w.x-x)**2+(w.z-z)**2<(1.2*U)**2){dup=true;break}}}
+    if(dup){DG.dbl++;continue}
+    const w={x,z,y:C.YS[k],rot};pts.push(w);const kk=bkey(x,z);if(bg.has(kk))bg.get(kk).push(w);else bg.set(kk,[w])}}}
+ BOLDIAG='paires '+DG.paires+' (vues '+DG.vues+', rue/coin '+DG.traverse+', lampadaire intercalé '+DG.intercale+') · bollards '+pts.length+' (hors bord '+DG.bord+', coins '+DG.coin+', bacs '+DG.bac+', bouches '+DG.bouche+', doublons '+DG.dbl+')';
+ if(!pts.length)return 0;
+ try{BOLGLB.forEach(sc=>{if(!sc)return;sc.traverse(c=>{if(!c.isMesh||!c.material)return;const arr=[].concat(c.material).map(m=>{if(!m||!m.isMeshStandardMaterial||m.metalnessMap||m.metalness<=BOL_METAL)return m;const k=m.clone();k.metalness=BOL_METAL;return k});c.material=Array.isArray(c.material)?arr:arr[0]})})}catch(e){console.warn('Bollards : métal',e)}
+ const n=bakeInstances(o,BOLGLB,pts,BOL_HM,BOL_ROT,'Bollards_GLB',BOL_MAX_VERTS,U,true);
+ console.log('[bollards]',BOLDIAG,'posés',n);return n}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
  o.updateMatrixWorld(true);
@@ -1508,7 +1563,7 @@ function start(o){
   const AW=planAwnings(o,s0*uf);
  const NL=reskinLines(o,s0*uf); const NS=retexSidewalk(o,sz,s0*uf); const NA=retexAsphalt(o,s0*uf); // goudron : texture + sol mouillé // nouvelle texture béton sur les trottoirs (avant la création des tuiles : partagée partout)
  const NP=pruneDead(o); // objets invisibles (cachés, matériau invisible) et groupes vides laissés par les suppressions
- const NT=hideTrees(o);const info=makeSlots(o,sz);let NLP=0;try{NLP=placeLamps(o,LPOS,s0*uf)}catch(e){console.warn('Pose lampadaires',e)}let NBIN=0;try{NBIN=placeBins(o,LPOS,s0*uf)}catch(e){console.warn('Pose poubelles',e);BINDIAG='ERREUR : '+e.message}let NHYD=0;try{NHYD=placeHydrants(o,LPOS,s0*uf)}catch(e){console.warn('Pose bouches',e);HYDDIAG='ERREUR : '+e.message}const NAW=buildAwnings(o,AW,s0*uf);const NM=MK_ON?buildMarkings(o,sz,s0*uf):'désactivés (#sanslignes)';MK_DIAG=NM;lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
+ const NT=hideTrees(o);const info=makeSlots(o,sz);let NLP=0;try{NLP=placeLamps(o,LPOS,s0*uf)}catch(e){console.warn('Pose lampadaires',e)}let NBIN=0;try{NBIN=placeBins(o,LPOS,s0*uf)}catch(e){console.warn('Pose poubelles',e);BINDIAG='ERREUR : '+e.message}let NHYD=0;try{NHYD=placeHydrants(o,LPOS,s0*uf)}catch(e){console.warn('Pose bouches',e);HYDDIAG='ERREUR : '+e.message}let NBOL=0;try{NBOL=placeBollards(o,LPOS,s0*uf)}catch(e){console.warn('Pose bollards',e);BOLDIAG='ERREUR : '+e.message}const NAW=buildAwnings(o,AW,s0*uf);const NM=MK_ON?buildMarkings(o,sz,s0*uf):'désactivés (#sanslignes)';MK_DIAG=NM;lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  const TL=[];for(let i=-cc;i<=cc;i++)for(let j=-cc;j<=cc;j++)TL.push([i,j]);EXTRA.forEach(e=>TL.push(e));
  const mi=Math.min(...TL.map(t=>t[0])),Mi=Math.max(...TL.map(t=>t[0])),mj=Math.min(...TL.map(t=>t[1])),Mj=Math.max(...TL.map(t=>t[1]));
@@ -1522,9 +1577,9 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'POUBELLES : '+NBIN+' posées (GLB '+(3-BINFB.length)+'/3'+(BINFB.length?', non chargés n°'+BINFB.join(','):'')+') · BOUCHES D\'INCENDIE : '+NHYD+' (GLB '+HYDGLB.filter(Boolean).length+'/2) — Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN+' ['+BINDIAG+' · GLB chargés '+(3-BINFB.length)+'/3'+(BINFB.length?' · non chargés n°'+BINFB.join(','):'')+'] · bouches d\'incendie : '+NHYD+' ['+HYDDIAG+']';
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'POUBELLES : '+NBIN+' posées (GLB '+(3-BINFB.length)+'/3'+(BINFB.length?', non chargés n°'+BINFB.join(','):'')+') · BOLLARDS : '+NBOL+' ['+BOLDIAG+'] · BOUCHES D\'INCENDIE : '+NHYD+' (GLB '+HYDGLB.filter(Boolean).length+'/2) — Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN+' ['+BINDIAG+' · GLB chargés '+(3-BINFB.length)+'/3'+(BINFB.length?' · non chargés n°'+BINFB.join(','):'')+'] · bouches d\'incendie : '+NHYD+' ['+HYDDIAG+']';
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,15000)}
-const PRELOAD=Promise.all([loadLampModels(),loadBinModels(),loadHydrantModels()]); // téléchargés EN PARALLÈLE de la ville (avant : on attendait la ville, puis eux)
+const PRELOAD=Promise.all([loadLampModels(),loadBinModels(),loadHydrantModels(),loadBollardModel()]); // téléchargés EN PARALLÈLE de la ville (avant : on attendait la ville, puis eux)
 tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);Promise.race([PRELOAD,new Promise(res=>setTimeout(res,30000))]).then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
 
