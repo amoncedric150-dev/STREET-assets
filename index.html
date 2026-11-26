@@ -53,7 +53,7 @@ const SKY={bg:SKY_BG_DATA,env:SKY_ENV_DATA,
  sunAz:-1.2,sunEl:25.1,   // position du soleil DANS l'image (azimut / élévation en degrés) : mesurée sur le pixel le plus lumineux
  sunI:2.1,envI:1.0,hemiI:0.25,expo:1.15,fog:0xb9c6cb};
 const scene=new THREE.Scene();scene.background=new THREE.Color(SKY.fog);scene.fog=new THREE.Fog(SKY.fog,300,2200);
-const cam=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,0.2,4000);
+const cam=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,0.5,4000);
 const r=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
 r.setPixelRatio(Math.min(devicePixelRatio||1,1.5));r.setSize(innerWidth,innerHeight);r.outputEncoding=THREE.sRGBEncoding;r.toneMapping=THREE.ACESFilmicToneMapping;r.toneMappingExposure=(()=>{try{return parseFloat(localStorage.getItem('ny_expo_day'))||SKY.expo}catch(e){return SKY.expo}})();r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;r.shadowMap.autoUpdate=false;r.shadowMap.needsUpdate=true;
 document.body.prepend(r.domElement);
@@ -320,7 +320,7 @@ function bakeLampMap(){if(!LAMPCV||!MAP)return;
  g.globalCompositeOperation='source-over';g.globalAlpha=1;g.fillStyle='#000';g.fillRect(0,0,W,W);g.globalCompositeOperation='lighter';
  for(let i=0;i<LAMPS.length;i++){const q=LAMPQ[i];if(!q)continue;const p=LAMPS[i];const s2=p.nh?sp*CROSS_R/LAMP_R:sp;g.globalAlpha=q/16;g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2);if(p.nh)g.drawImage(LAMPSPR,(p.x-MAP.x0)*k-s2/2,(MAP.z0-p.z)*k-s2/2,s2,s2)} // carrefour : 2 passes = zone très éclairée plus large
  g.globalAlpha=1;LAMPTEX.needsUpdate=true}
-function isLampMesh(c){if(LAMPNAMES.has(c.name)||LAMPRE.test(c.name||''))return true;
+function isLampMesh(c){if(c.userData&&c.userData.noLamp)return false;if(LAMPNAMES.has(c.name)||LAMPRE.test(c.name||''))return true;
  for(const m of [].concat(c.material))if(m&&m.name&&LAMPRE.test(m.name))return true;
  for(let p=c.parent,i=0;p&&p!==wrap&&i<4;p=p.parent,i++)if(p.name&&LAMPRE.test(p.name))return true;return false}
 function suppress(arr,rad){const out=[],r2=rad*rad;for(const p of arr){let ok=true;for(const q of out){const dx=p.x-q.x,dz=p.z-q.z;if(dx*dx+dz*dz<r2){ok=false;break}}if(ok)out.push(p);if(out.length>=700)break}return out}
@@ -328,7 +328,9 @@ function findLamps(){ // par noms : on cherche le point le plus haut de chaque p
  const g=MAP.g,cells=new Map(),v=new THREE.Vector3();wrap.updateMatrixWorld(true);
  wrap.traverse(c=>{if(!c.isMesh||!c.geometry||!visChain(c)||!isLampMesh(c))return;const pa=c.geometry.attributes.position;if(!pa)return;const mw=c.matrixWorld;
   for(let i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(mw);if(v.y<g+3.8)continue;const key=Math.floor(v.x/3)+','+Math.floor(v.z/3),e=cells.get(key);if(!e||v.y>e.y)cells.set(key,{x:v.x,y:v.y,z:v.z})}});
- return suppress([...cells.values()].sort((a,b)=>b.y-a.y),6)}
+ const out=suppress([...cells.values()].sort((a,b)=>b.y-a.y),6),vv=new THREE.Vector3();
+ wrap.traverse(c=>{const pt=c.userData&&c.userData.lampPts;if(!pt)return;c.updateMatrixWorld(true);for(let i=0;i<pt.length;i+=3){vv.set(pt[i],pt[i+1],pt[i+2]).applyMatrix4(c.matrixWorld);out.push({x:vv.x,y:vv.y,z:vv.z,nh:true})}}); // lampadaires GLB : même intensité / rayon que les carrefours (nh)
+ return out}
 function findLampsH(){ // repli : objets fins et hauts sur la carte des hauteurs (poteaux)
  const M=MAP,g=M.g,c=[];for(let k=0;k<NN;k++)if(M.has[k]&&M.walk[k]&&M.H[k]>g+4.5&&M.H[k]<g+14)c.push(k);
  c.sort((a,b)=>M.H[b]-M.H[a]);return suppress(c.map(k=>{const xz=cellXZ(k);return{x:xz[0],y:M.H[k],z:xz[1]}}),7)}
@@ -1078,16 +1080,76 @@ function mkCanvasTex(w,h,draw,srgb){const c=document.createElement('canvas');c.w
 
 // ===== Traits d'origine du modèle (CityGen_lanes_*) : on les GARDE (déjà bien placés) et on leur applique TES textures =====
 function reskinLines(o,mpu){let n=0;const tl=new THREE.TextureLoader(),T={};
- const tex=src=>{const t=tl.load(src);t.encoding=THREE.sRGBEncoding;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=8;return t};
- T.w=tex(MK_IMG.white);T.y=tex(MK_IMG.yellow);const TILE=2.0; // 1 répétition de texture = 2 m (change ici)
+ const tex=src=>{const t=tl.load(src);t.encoding=THREE.sRGBEncoding;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=Math.min(16,r.capabilities.getMaxAnisotropy());return t};
+ T.w=tex(MK_IMG.white);T.y=tex(MK_IMG.yellow);const TILE=0.6; // 1 répétition de texture = 2 m (change ici)
  o.traverse(c=>{if(!c.isMesh||!c.geometry||!c.geometry.attributes.position)return;const ms=[].concat(c.material).filter(Boolean);
   if(!ms.length||!ms.every(x=>OLDLINE_RE.test(x.name||'')))return;
   const pa=c.geometry.attributes.position,uv=new Float32Array(pa.count*2),k=mpu/TILE;
   for(let i=0;i<pa.count;i++){uv[i*2]=pa.getX(i)*k;uv[i*2+1]=pa.getZ(i)*k}
   c.geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
-  const nm=ms.map(m=>{const q=m.clone();q.map=/secondary/i.test(m.name||'')?T.y:T.w;q.color.set(0xffffff);q.transparent=true;q.alphaTest=.03;q.depthWrite=false;q.side=THREE.DoubleSide;q.polygonOffset=true;q.polygonOffsetFactor=-2;q.polygonOffsetUnits=-2;q.needsUpdate=true;return q});
-  c.material=Array.isArray(c.material)?nm:nm[0];c.userData.decal=true;n++});
+  const nm=ms.map(m=>{const q=m.clone();q.map=/secondary/i.test(m.name||'')?T.y:T.w;q.color.set(0xffffff);q.transparent=true;q.alphaTest=.03;q.depthWrite=false;q.side=THREE.DoubleSide;q.polygonOffset=true;q.polygonOffsetFactor=-8;q.polygonOffsetUnits=-8;q.needsUpdate=true;return q});
+  c.material=Array.isArray(c.material)?nm:nm[0];c.userData.decal=true;c.renderOrder=2;n++});
  console.log('[traits] retexturés :',n);return n}
+
+// ===== Lampadaires GLB : posés exactement là où étaient les anciens (lus dans Object_30/32 AVANT leur suppression) · 1 seul modèle par emplacement =====
+const LAMP_URLS=['street_lamp.glb','street_lamp%202.glb','street_lamp%203.glb'].map(n=>R2+'Trottoir/Lampadaire%20/'+n);
+const LAMP_SRC=['Object_30','Object_32']; // objets du modèle qui contenaient les anciens lampadaires
+const LAMP_MIN_H=5,LAMP_MAX_H=11;        // hauteur mini / maxi d'un lampadaire (m) : on reprend la hauteur de l'ancien, bornée ici
+let LAMPGLB=[null,null,null];
+function loadLampModels(){return Promise.all(LAMP_URLS.map((u,i)=>new Promise(res=>{try{loader.load(u,g=>{LAMPGLB[i]=g.scene;res()},undefined,()=>{console.warn('Lampadaire introuvable',u);res()})}catch(e){console.warn(e);res()}})))}
+function collectLamps(o,mpu){
+ o.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(o.matrixWorld).invert(),m=new THREE.Matrix4(),v=new THREE.Vector3(),src=[];
+ o.traverse(c=>{if(c.isMesh&&c.geometry&&c.geometry.attributes.position&&LAMP_SRC.includes(c.name))src.push(c)});
+ if(!src.length)return [];
+ const P=src.map(c=>{const pa=c.geometry.attributes.position,n=pa.count,out=new Float32Array(n*3);m.copy(c.matrixWorld).premultiply(inv);
+  for(let q=0;q<n;q++){v.fromBufferAttribute(pa,q).applyMatrix4(m);out[q*3]=v.x;out[q*3+1]=v.y;out[q*3+2]=v.z}return out});
+ let g0=1e18;for(const a of P)for(let i=1;i<a.length;i+=3)if(a[i]<g0)g0=a[i];
+ const U=1/mpu,thr=g0+3.4*U,R=4*U,hi=[];
+ for(const a of P)for(let i=0;i<a.length;i+=3)if(a[i+1]>thr)hi.push([a[i],a[i+1],a[i+2]]);
+ hi.sort((p,q)=>q[1]-p[1]);
+ const key=(i,j)=>(i+8192)*16384+(j+8192),grid=new Map(),tops=[];
+ const near=(x,z,r,f)=>{const ci=Math.floor(x/R),cj=Math.floor(z/R);for(let di=-1;di<=1;di++)for(let dj=-1;dj<=1;dj++){const l=grid.get(key(ci+di,cj+dj));if(l)for(const t of l){const ex=t.x-x,ez=t.z-z;if(ex*ex+ez*ez<r*r&&f(t))return t}}return null};
+ for(const p of hi){if(near(p[0],p[2],R,()=>true))continue;const t={x:p[0],y:p[1],z:p[2],sx:0,sz:0,n:0,by:1e18},k=key(Math.floor(p[0]/R),Math.floor(p[2]/R));tops.push(t);const l=grid.get(k);if(l)l.push(t);else grid.set(k,[t])}
+ // 1) axe du poteau : centroïde des points situés entre 1,6 et 3,2 m de haut autour du sommet
+ const b0=g0+1.6*U,b1=g0+3.2*U;
+ for(const a of P)for(let i=0;i<a.length;i+=3){const y=a[i+1];if(y<b0||y>b1)continue;const t=near(a[i],a[i+2],3*U,()=>true);if(t){t.sx+=a[i];t.sz+=a[i+2];t.n++}}
+ // 2) pied du poteau : point le plus bas à moins de 0,7 m de l'axe
+ for(const t of tops)if(t.n>=3){t.cx=t.sx/t.n;t.cz=t.sz/t.n}
+ const lo=g0+1.2*U;
+ for(const a of P)for(let i=0;i<a.length;i+=3){if(a[i+1]>lo)continue;const t=near(a[i],a[i+2],3*U,q=>q.cx!==undefined);if(t&&Math.hypot(a[i]-t.cx,a[i+2]-t.cz)<.7*U&&a[i+1]<t.by)t.by=a[i+1]}
+ const out=[];for(const t of tops){if(t.n<3)continue;const by=t.by<1e17?t.by:g0,hm=(t.y-by)*mpu;if(hm<3.6||hm>16)continue;out.push({x:t.cx,z:t.cz,y:by,top:t.y,hm,ax:t.x-t.cx,az:t.z-t.cz})}
+ console.log('[lampadaires] sommets hauts',hi.length,'· poteaux retenus',out.length,'sur',tops.length);return out}
+function placeLamps(o,L,mpu){
+ const mods=[];
+ LAMPGLB.forEach((sc,idx)=>{if(!sc)return;sc.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(sc.matrixWorld).invert(),subs=[],v=new THREE.Vector3(),bb=new THREE.Box3();
+  sc.traverse(c=>{if(c.isMesh&&c.geometry&&c.geometry.attributes.position)subs.push({g:c.geometry,mat:c.material,M:new THREE.Matrix4().copy(c.matrixWorld).premultiply(inv)})});
+  if(!subs.length)return;
+  const pts=[];subs.forEach(s=>{const pa=s.g.attributes.position;for(let i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(s.M);pts.push([v.x,v.y,v.z]);bb.expandByPoint(v)}});
+  const mn=bb.min.y,H=bb.max.y-mn;if(!(H>0))return;
+  const avg=(a,b)=>{let x=0,z=0,n=0;for(const p of pts)if(p[1]>=mn+a*H&&p[1]<=mn+b*H){x+=p[0];z+=p[2];n++}return n?[x/n,z/n]:null};
+  const sh=avg(.2,.5)||[0,0],tp=avg(.85,1),ex=tp?tp[0]-sh[0]:0,ez=tp?tp[1]-sh[1]:0,arm=Math.hypot(ex,ez)>.03*H;
+  mods.push({sc,subs,mn,H,px:sh[0],pz:sh[1],ang:arm?Math.atan2(ex,ez):null});console.log('[lampadaire GLB '+idx+'] hauteur',H.toFixed(2),'bras',arm?'oui':'non')});
+ if(!mods.length||!L.length)return 0;
+ // 1 emplacement = 1 seul modèle (tirage fixe par position, jamais deux modèles au même endroit)
+ const pick=p=>{let h=Math.imul(Math.round(p.x*1000)^0x9e3779b1,0x85ebca6b)^Math.imul(Math.round(p.z*1000)^0x51ed270b,0xc2b2ae35);h^=h>>>13;h=Math.imul(h,0x27d4eb2f);h^=h>>>15;return (h>>>0)};
+ const groups=mods.map(()=>[]);L.forEach(p=>{const h=pick(p);p._h=h;groups[h%mods.length].push(p)});
+ const grp=new THREE.Group();grp.name='Poteaux_GLB';const lampPts=[];
+ const M=new THREE.Matrix4(),T1=new THREE.Matrix4(),R1=new THREE.Matrix4(),S1=new THREE.Matrix4(),T0=new THREE.Matrix4(),W=new THREE.Matrix4(),N3=new THREE.Matrix3(),v=new THREE.Vector3(),nv=new THREE.Vector3();
+ let tot=0;
+ mods.forEach((md,mi)=>{const list=groups[mi];if(!list.length)return;
+  md.subs.forEach(sb=>{const g=sb.g,pa=g.attributes.position,na=g.attributes.normal,ua=g.attributes.uv,ix=g.index,nv0=pa.count,ni=ix?ix.count:nv0,K=list.length;
+   const P=new Float32Array(nv0*K*3),Nn=na?new Float32Array(nv0*K*3):null,Uu=ua?new Float32Array(nv0*K*2):null,I=new Uint32Array(ni*K);let o3=0,o2=0,oi=0,base=0;
+   for(const p of list){const hm=Math.min(LAMP_MAX_H,Math.max(LAMP_MIN_H,p.hm)),k=(hm/mpu)/md.H;
+    let phi=0;if(md.ang!==null&&Math.hypot(p.ax,p.az)>.5/mpu)phi=Math.atan2(p.ax,p.az)-md.ang;else phi=(p._h%4)*Math.PI/2;
+    T0.makeTranslation(-md.px,-md.mn,-md.pz);S1.makeScale(k,k,k);R1.makeRotationY(phi);T1.makeTranslation(p.x,p.y-.03/mpu,p.z);
+    W.copy(T1).multiply(R1).multiply(S1).multiply(T0).multiply(sb.M);N3.getNormalMatrix(W);
+    for(let i=0;i<nv0;i++){v.fromBufferAttribute(pa,i).applyMatrix4(W);P[o3]=v.x;P[o3+1]=v.y;P[o3+2]=v.z;if(Nn){nv.fromBufferAttribute(na,i).applyMatrix3(N3).normalize();Nn[o3]=nv.x;Nn[o3+1]=nv.y;Nn[o3+2]=nv.z}o3+=3;if(Uu){Uu[o2++]=ua.getX(i);Uu[o2++]=ua.getY(i)}}
+    for(let i=0;i<ni;i++)I[oi++]=(ix?ix.getX(i):i)+base;base+=nv0}
+   const G=new THREE.BufferGeometry();G.setAttribute('position',new THREE.BufferAttribute(P,3));if(Nn)G.setAttribute('normal',new THREE.BufferAttribute(Nn,3));if(Uu)G.setAttribute('uv',new THREE.BufferAttribute(Uu,2));G.setIndex(new THREE.BufferAttribute(I,1));
+   if(!Nn)G.computeVertexNormals();
+   const me=new THREE.Mesh(G,sb.mat);me.name='Poteau_GLB_'+mi;me.userData.noLamp=true;grp.add(me);tot+=nv0*K});
+  list.forEach(p=>lampPts.push(p.x,p.y+Math.min(LAMP_MAX_H,Math.max(LAMP_MIN_H,p.hm))/mpu,p.z))});
+ grp.userData.lampPts=lampPts;grp.userData.noLamp=true;o.add(grp);console.log('[lampadaires] posés',L.length,'par modèle',groups.map(g=>g.length),'sommets',tot);return L.length}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
  o.updateMatrixWorld(true);
@@ -1167,12 +1229,13 @@ function start(o){
  o.position.x-=c.x;o.position.z-=c.z;o.position.y-=bx.min.y;o.updateMatrixWorld(true);
  const sz=bx.getSize(new THREE.Vector3());box0={x:sz.x,y:sz.y,z:sz.z};s0=TARGET/Math.max(sz.x,sz.z);
  // Objets supprimés définitivement (par nom exact) : retirés du modèle AVANT la création des 3x3 tuiles, donc partout
+ let LPOS=[];try{LPOS=collectLamps(o,s0*uf)}catch(e){console.warn('Lampadaires',e)}
  const ND=(()=>{const del=[];o.traverse(c=>{if(c.isMesh&&(KILL.includes(c.name)||KILLRE.test(c.name||'')||(()=>{const ms=[].concat(c.material).filter(Boolean);return false})()))del.push(c)});
   del.forEach(c=>{if(c.geometry)c.geometry.dispose();c.parent&&c.parent.remove(c)});return del.length})();
   const AW=planAwnings(o,s0*uf);
  const NL=reskinLines(o,s0*uf); const NS=retexSidewalk(o,sz,s0*uf); const NA=retexAsphalt(o,s0*uf); // goudron : texture + sol mouillé // nouvelle texture béton sur les trottoirs (avant la création des tuiles : partagée partout)
  const NP=pruneDead(o); // objets invisibles (cachés, matériau invisible) et groupes vides laissés par les suppressions
- const NT=hideTrees(o);const info=makeSlots(o,sz);const NAW=buildAwnings(o,AW,s0*uf);const NM=MK_ON?buildMarkings(o,sz,s0*uf):'désactivés (#sanslignes)';MK_DIAG=NM;lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
+ const NT=hideTrees(o);const info=makeSlots(o,sz);let NLP=0;try{NLP=placeLamps(o,LPOS,s0*uf)}catch(e){console.warn('Pose lampadaires',e)}const NAW=buildAwnings(o,AW,s0*uf);const NM=MK_ON?buildMarkings(o,sz,s0*uf):'désactivés (#sanslignes)';MK_DIAG=NM;lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  const TL=[];for(let i=-cc;i<=cc;i++)for(let j=-cc;j<=cc;j++)TL.push([i,j]);EXTRA.forEach(e=>TL.push(e));
  const mi=Math.min(...TL.map(t=>t[0])),Mi=Math.max(...TL.map(t=>t[0])),mj=Math.min(...TL.map(t=>t[1])),Mj=Math.max(...TL.map(t=>t[1]));
@@ -1186,9 +1249,9 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM;
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length;
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,7000)}
-tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();throw err}},40))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
+tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);loadLampModels().then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
 
 // ===== Système d'intérieurs (appartements) : branché sur le joueur P, la caméra et le chargeur GLB existants =====
