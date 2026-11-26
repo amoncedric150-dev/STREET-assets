@@ -1252,6 +1252,62 @@ function buildingLamps(o,have,mpu){
    if(best){out.push({x:best.x,z:best.z,y:best.y,hm:LAMP_H,ax:best.ax,az:best.az});diag.push(sd.n+' : +1')}else diag.push(sd.n+' : pas de trottoir trouvé')}
   console.log('[lampadaires bâtiment]',B.name,'· taille',((bb.max.x-bb.min.x)*mpu).toFixed(0)+'×'+((bb.max.z-bb.min.z)*mpu).toFixed(0)+' m ·',diag.join(' · '))}
  return out}
+// ===== Poubelles : une à CHAQUE coin de carrefour, juste à côté du lampadaire (3 modèles mélangés) =====
+const BIN_URLS=['trash_can%203.glb','trash_can_and_ashtray.glb','trash_can%204.glb'].map(n=>R2+'Trottoir/Poubelle/'+n);
+const BIN_HM=[1.0,1.0,1.0];       // hauteur voulue (m) de chaque modèle : change ici si une poubelle te paraît trop grande / petite
+const BIN_MAX_VERTS=1500000;      // garde-fou : budget total de sommets pour toutes les poubelles
+let BINGLB=[null,null,null];
+function loadBinModels(){return Promise.all(BIN_URLS.map((u,i)=>new Promise(res=>{try{loader.load(u,g=>{BINGLB[i]=g.scene;res()},undefined,()=>{console.warn('Poubelle introuvable',u);res()})}catch(e){console.warn(e);res()}})))}
+// coins de trottoir : cases de trottoir au bord de la route, entourées de route (là où deux rues se croisent), 1 point tous les ~10 m
+function collectCorners(mpu){
+ const C=LCTX;if(!C)return [];
+ const rc=Math.max(2,Math.round(2.2/C.cm)),tot=(2*rc+1)*(2*rc+1),cand=[];
+ for(let j=rc;j<C.Dz-rc;j++)for(let i=rc;i<C.Dx-rc;i++){const k=j*C.Dx+i;if(!C.S[k]||C.R[k])continue;let sx=0,sz=0,c=0,dm=1e9;
+  for(let b=-rc;b<=rc;b++)for(let a=-rc;a<=rc;a++){if(C.R[(j+b)*C.Dx+i+a]){sx+=a;sz+=b;c++;const d=Math.hypot(a,b);if(d<dm)dm=d}}
+  const f=c/tot;if(f<.6||dm<C.dMin||dm>C.dMax*1.6)continue;cand.push([f,i,j,sx,sz])}
+ cand.sort((p,q)=>q[0]-p[0]);
+ const CR=10/mpu,g=new Map(),out=[];
+ for(const [f,i,j,sx,sz] of cand){const x=C.x0+(i+.5)*C.cell,z=C.z0+(j+.5)*C.cell,ci=Math.floor(x/CR),cj=Math.floor(z/CR);let ok=true;
+  for(let a=-1;a<=1&&ok;a++)for(let b=-1;b<=1&&ok;b++){const l=g.get((ci+a)+','+(cj+b));if(l)for(const q of l)if((q.x-x)**2+(q.z-z)**2<CR*CR){ok=false;break}}
+  if(!ok)continue;const l=Math.hypot(sx,sz)||1,pt={x,z,nx:sx/l,nz:sz/l},key=ci+','+cj;out.push(pt);if(g.has(key))g.get(key).push(pt);else g.set(key,[pt]);if(out.length>2500)break}
+ return out}
+function placeBins(o,L,mpu){
+ const C=LCTX;if(!C||!BINGLB.some(Boolean))return 0;
+ const corners=collectCorners(mpu);if(!corners.length)return 0;
+ const U=1/mpu,rr2=Math.max(1,Math.ceil(.5/C.cm)),R8=8*U;
+ const okAt=(x,z)=>{const i=Math.floor((x-C.x0)/C.cell),j=Math.floor((z-C.z0)/C.cell);if(i<rr2||j<rr2||i>=C.Dx-rr2||j>=C.Dz-rr2)return null;const k=j*C.Dx+i;if(!C.S[k]||C.R[k])return null;
+  for(let b=-rr2;b<=rr2;b++)for(let a=-rr2;a<=rr2;a++)if(C.R[(j+b)*C.Dx+i+a])return null;return C.YS[k]};
+ const OFF=[[-1.2,0],[-1,1],[-1,-1],[-1.6,.6],[-1.6,-.6],[-.8,1.4],[-.8,-1.4],[-2,0]]; // (m) : reculer vers le trottoir (−n), puis décaler sur le côté (t)
+ const pts=[];
+ for(const c of corners){let ax=c.x,az=c.z,bd=R8*R8;for(const q of L){const d=(q.x-c.x)**2+(q.z-c.z)**2;if(d<bd){bd=d;ax=q.x;az=q.z}} // lampadaire le plus proche du coin (sinon : le coin lui-même)
+  const tx=-c.nz,tz=c.nx;
+  for(const [a,b] of OFF){const x=ax+(c.nx*a+tx*b)*U,z=az+(c.nz*a+tz*b)*U,y=okAt(x,z);if(y!==null){pts.push({x,z,y});break}}}
+ if(!pts.length)return 0;
+ const mods=[];
+ BINGLB.forEach((sc,idx)=>{if(!sc)return;sc.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(sc.matrixWorld).invert(),subs=[],v=new THREE.Vector3(),bb=new THREE.Box3();
+  sc.traverse(c=>{if(c.isMesh&&c.geometry&&c.geometry.attributes.position)subs.push({g:c.geometry,mat:c.material,M:new THREE.Matrix4().copy(c.matrixWorld).premultiply(inv)})});
+  if(!subs.length)return;let nvt=0;
+  subs.forEach(sb=>{const pa=sb.g.attributes.position;nvt+=pa.count;for(let i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(sb.M);bb.expandByPoint(v)}});
+  const H=bb.max.y-bb.min.y;if(!(H>0))return;
+  const c=bb.getCenter(new THREE.Vector3());mods.push({subs,mn:bb.min.y,cx:c.x,cz:c.z,H,nvt,hm:BIN_HM[idx]||1});console.log('[poubelle GLB '+idx+'] hauteur',H.toFixed(2),'sommets',nvt)});
+ if(!mods.length)return 0;
+ const pick=p=>{let h=Math.imul(Math.round(p.x*1000)^0x2c1b3c6d,0x85ebca6b)^Math.imul(Math.round(p.z*1000)^0x297a2d39,0xc2b2ae35);h^=h>>>13;h=Math.imul(h,0x27d4eb2f);h^=h>>>15;return h>>>0};
+ let groups=mods.map(()=>[]);pts.forEach(p=>{p._h=pick(p);groups[p._h%mods.length].push(p)});
+ groups=groups.map((l,mi)=>{const mx=Math.max(1,Math.floor(BIN_MAX_VERTS/mods.length/mods[mi].nvt));if(l.length<=mx)return l;const st=Math.ceil(l.length/mx);return l.filter((_,i)=>i%st===0)});
+ const grp=new THREE.Group();grp.name='Poubelles_GLB';
+ const T1=new THREE.Matrix4(),R1=new THREE.Matrix4(),S1=new THREE.Matrix4(),T0=new THREE.Matrix4(),W=new THREE.Matrix4(),N3=new THREE.Matrix3(),v=new THREE.Vector3(),nv=new THREE.Vector3();let total=0;
+ mods.forEach((md,mi)=>{const list=groups[mi];if(!list.length)return;
+  md.subs.forEach(sb=>{const g=sb.g,pa=g.attributes.position,na=g.attributes.normal,ua=g.attributes.uv,ix=g.index,nv0=pa.count,ni=ix?ix.count:nv0,K=list.length;
+   const P=new Float32Array(nv0*K*3),Nn=na?new Float32Array(nv0*K*3):null,Uu=ua?new Float32Array(nv0*K*2):null,I=new Uint32Array(ni*K);let o3=0,o2=0,oi=0,base=0;
+   for(const p of list){const k=(md.hm*(.92+.16*((p._h>>>8&255)/255))*U)/md.H,phi=((p._h>>>4)%4)*Math.PI/2;
+    T0.makeTranslation(-md.cx,-md.mn,-md.cz);S1.makeScale(k,k,k);R1.makeRotationY(phi);T1.makeTranslation(p.x,p.y-.01*U,p.z);
+    W.copy(T1).multiply(R1).multiply(S1).multiply(T0).multiply(sb.M);N3.getNormalMatrix(W);
+    for(let i=0;i<nv0;i++){v.fromBufferAttribute(pa,i).applyMatrix4(W);P[o3]=v.x;P[o3+1]=v.y;P[o3+2]=v.z;if(Nn){nv.fromBufferAttribute(na,i).applyMatrix3(N3).normalize();Nn[o3]=nv.x;Nn[o3+1]=nv.y;Nn[o3+2]=nv.z}o3+=3;if(Uu){Uu[o2++]=ua.getX(i);Uu[o2++]=ua.getY(i)}}
+    for(let i=0;i<ni;i++)I[oi++]=(ix?ix.getX(i):i)+base;base+=nv0}
+   const G=new THREE.BufferGeometry();G.setAttribute('position',new THREE.BufferAttribute(P,3));if(Nn)G.setAttribute('normal',new THREE.BufferAttribute(Nn,3));if(Uu)G.setAttribute('uv',new THREE.BufferAttribute(Uu,2));G.setIndex(new THREE.BufferAttribute(I,1));
+   if(!Nn)G.computeVertexNormals();
+   const me=new THREE.Mesh(G,sb.mat);me.name='Poubelle_GLB_'+mi;me.userData.noLamp=true;grp.add(me);total+=K})});
+ grp.userData.noLamp=true;o.add(grp);const n=groups.reduce((a,l)=>a+l.length,0);console.log('[poubelles] coins',corners.length,'· posées',n,'par modèle',groups.map(l=>l.length));return n}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
  o.updateMatrixWorld(true);
@@ -1339,7 +1395,7 @@ function start(o){
   const AW=planAwnings(o,s0*uf);
  const NL=reskinLines(o,s0*uf); const NS=retexSidewalk(o,sz,s0*uf); const NA=retexAsphalt(o,s0*uf); // goudron : texture + sol mouillé // nouvelle texture béton sur les trottoirs (avant la création des tuiles : partagée partout)
  const NP=pruneDead(o); // objets invisibles (cachés, matériau invisible) et groupes vides laissés par les suppressions
- const NT=hideTrees(o);const info=makeSlots(o,sz);let NLP=0;try{NLP=placeLamps(o,LPOS,s0*uf)}catch(e){console.warn('Pose lampadaires',e)}const NAW=buildAwnings(o,AW,s0*uf);const NM=MK_ON?buildMarkings(o,sz,s0*uf):'désactivés (#sanslignes)';MK_DIAG=NM;lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
+ const NT=hideTrees(o);const info=makeSlots(o,sz);let NLP=0;try{NLP=placeLamps(o,LPOS,s0*uf)}catch(e){console.warn('Pose lampadaires',e)}let NBIN=0;try{NBIN=placeBins(o,LPOS,s0*uf)}catch(e){console.warn('Pose poubelles',e)}const NAW=buildAwnings(o,AW,s0*uf);const NM=MK_ON?buildMarkings(o,sz,s0*uf):'désactivés (#sanslignes)';MK_DIAG=NM;lighten(o);const FL=RING?findLots(o,sz):{lots:[],hide:[]};LOTS=FL.lots;
  wrap=new THREE.Group();const cc=(TILES-1)/2;
  const TL=[];for(let i=-cc;i<=cc;i++)for(let j=-cc;j<=cc;j++)TL.push([i,j]);EXTRA.forEach(e=>TL.push(e));
  const mi=Math.min(...TL.map(t=>t[0])),Mi=Math.max(...TL.map(t=>t[0])),mj=Math.min(...TL.map(t=>t[1])),Mj=Math.max(...TL.map(t=>t[1]));
@@ -1353,10 +1409,10 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés)';
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN;
  {const d=document.createElement('div');d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.75);color:#fff;font:11px/1.3 monospace;padding:4px 6px;pointer-events:none';d.textContent='v9 · LAMPADAIRES posés '+NLP+'/'+LPOS.length+' · modèles GLB chargés '+LAMPGLB.filter(Boolean).length+'/2'+LAMPDIAG;document.body.appendChild(d);setTimeout(()=>d.remove(),90000)}
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,7000)}
-tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);loadLampModels().then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
+tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);Promise.all([loadLampModels(),loadBinModels()]).then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
 
 // ===== Système d'intérieurs (appartements) : branché sur le joueur P, la caméra et le chargeur GLB existants =====
