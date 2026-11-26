@@ -53,7 +53,7 @@ const SKY={bg:SKY_BG_DATA,env:SKY_ENV_DATA,
  sunAz:-1.2,sunEl:25.1,   // position du soleil DANS l'image (azimut / élévation en degrés) : mesurée sur le pixel le plus lumineux
  sunI:2.1,envI:1.0,hemiI:0.25,expo:1.15,fog:0xb9c6cb};
 const scene=new THREE.Scene();scene.background=new THREE.Color(SKY.fog);scene.fog=new THREE.Fog(SKY.fog,300,2200);
-const cam=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,0.2,4000);
+const cam=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,0.5,4000);
 const r=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
 r.setPixelRatio(Math.min(devicePixelRatio||1,1.5));r.setSize(innerWidth,innerHeight);r.outputEncoding=THREE.sRGBEncoding;r.toneMapping=THREE.ACESFilmicToneMapping;r.toneMappingExposure=(()=>{try{return parseFloat(localStorage.getItem('ny_expo_day'))||SKY.expo}catch(e){return SKY.expo}})();r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;r.shadowMap.autoUpdate=false;r.shadowMap.needsUpdate=true;
 document.body.prepend(r.domElement);
@@ -1078,15 +1078,15 @@ function mkCanvasTex(w,h,draw,srgb){const c=document.createElement('canvas');c.w
 
 // ===== Traits d'origine du modèle (CityGen_lanes_*) : on les GARDE (déjà bien placés) et on leur applique TES textures =====
 function reskinLines(o,mpu){let n=0;const tl=new THREE.TextureLoader(),T={};
- const tex=src=>{const t=tl.load(src);t.encoding=THREE.sRGBEncoding;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=8;return t};
- T.w=tex(MK_IMG.white);T.y=tex(MK_IMG.yellow);const TILE=2.0; // 1 répétition de texture = 2 m (change ici)
+ const tex=src=>{const t=tl.load(src);t.encoding=THREE.sRGBEncoding;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=Math.min(16,r.capabilities.getMaxAnisotropy());return t};
+ T.w=tex(MK_IMG.white);T.y=tex(MK_IMG.yellow);const TILE=0.6; // 1 répétition de texture = 2 m (change ici)
  o.traverse(c=>{if(!c.isMesh||!c.geometry||!c.geometry.attributes.position)return;const ms=[].concat(c.material).filter(Boolean);
   if(!ms.length||!ms.every(x=>OLDLINE_RE.test(x.name||'')))return;
   const pa=c.geometry.attributes.position,uv=new Float32Array(pa.count*2),k=mpu/TILE;
   for(let i=0;i<pa.count;i++){uv[i*2]=pa.getX(i)*k;uv[i*2+1]=pa.getZ(i)*k}
   c.geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));
-  const nm=ms.map(m=>{const q=m.clone();q.map=/secondary/i.test(m.name||'')?T.y:T.w;q.color.set(0xffffff);q.transparent=true;q.alphaTest=.03;q.depthWrite=false;q.side=THREE.DoubleSide;q.polygonOffset=true;q.polygonOffsetFactor=-2;q.polygonOffsetUnits=-2;q.needsUpdate=true;return q});
-  c.material=Array.isArray(c.material)?nm:nm[0];c.userData.decal=true;n++});
+  const nm=ms.map(m=>{const q=m.clone();q.map=/secondary/i.test(m.name||'')?T.y:T.w;q.color.set(0xffffff);q.transparent=true;q.alphaTest=.03;q.depthWrite=false;q.side=THREE.DoubleSide;q.polygonOffset=true;q.polygonOffsetFactor=-8;q.polygonOffsetUnits=-8;q.needsUpdate=true;return q});
+  c.material=Array.isArray(c.material)?nm:nm[0];c.userData.decal=true;c.renderOrder=2;n++});
  console.log('[traits] retexturés :',n);return n}
 function buildMarkings(o,sz,s){try{return buildMarkings0(o,sz,s)}catch(e){console.warn('Marquages',e);return 'erreur ('+e.message+')'}}
 function buildMarkings0(o,sz,s){
