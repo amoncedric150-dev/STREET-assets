@@ -144,7 +144,7 @@ function applyTOD(now){
   sun.shadow.bias=-Math.min(.0018,.0002+.7*(180/2048)/Math.tan(el)/699);sun.shadow.normalBias=.3+.7*Math.max(0,1-el/(30*DEG));
   col('hs',hemi.color);col('hg',hemi.groundColor);hemi.intensity=Math.max(0,L('hi'));
   col('fog',scene.fog.color);scene.background.copy(scene.fog.color);
-  let lv=c01(L('lamp')),wv=c01(L('win'));if(h>=12&&h<19.5){const f=smt(17.5,19.5,h);lv=h<17.5?0:.065+.235*f;wv=h<17.5?0:.02+.23*f} // jour → coucher : rien avant 17 h 30, puis montée douce jusqu'à 19 h 30
+  let lv=c01(L('lamp')),wv=c01(L('win'));if(h>=12&&h<21){const f=smt(17.5,19.75,h),g=smt(19.75,21,h);lv=h<17.5?0:(.06+.89*f)-.10*g;wv=h<17.5?0:(.02+.83*f)-.05*g} // heure du JEU : rien avant 17 h 30, puis tout s'allume (≈ 95 % à 19 h 45), raccord doux avec le crépuscule à 21 h
   TOD.lamp=lv;WIN.value=wv;TOD.label=(s<.5?A:B).n;
   if(SKYREADY){const envI=Math.max(0,L('env')),key=sA+'|'+sB+'|'+Math.round(fs*40)+'|'+Math.round(oA*72)+'|'+Math.round(oB*72)+'|'+Math.round(envI*40);
    // clé grossière (pas de 5° de rotation, 2,5 % de fondu) + délai minimal doublé si le jeu rame → plus de PMREM en continu
@@ -287,16 +287,16 @@ const LAMPGLSL='float ld=distance(vLP,cameraPosition);if(uLampOn>0.002&&ld<uLamp
  'float ll=texture2D(uLampMap,clamp(lq,0.0,1.0)).r*step(0.0,min(lq.x,lq.y))*step(max(lq.x,lq.y),1.0);'+
  'float hh=1.0-smoothstep(1.5,9.0,vLP.y-uLampP.w);'+                       // la lumière retombe avec la hauteur (toits non éclairés)
  'float up=smoothstep(0.45,0.85,normalize(vLN).y);'+                       // sol / trottoir = plein · murs des bâtiments (rez-de-chaussée compris) = AUCUNE lumière
- 'totalEmissiveRadiance+=diffuseColor.rgb*uLampCol*(ll*hh*up*uLampOn*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
+ 'totalEmissiveRadiance+=(diffuseColor.rgb*0.8+vec3(0.07))*uLampCol*(ll*hh*up*uLampOn*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
 // Lueur des fenêtres : les bâtiments éclairés projettent une lumière chaude et douce sur la rue, les carrefours et les façades voisines (carte du dessus floutée, calculée une fois)
-const GLOWAMP=1.25; // intensité de la lueur (baisse si trop forte)
+const GLOWAMP=1.6; // intensité de la lueur (baisse si trop forte)
 let GLOWTEX=null;
 const GLOWGLSL='if(uGlowK>0.002&&ld<uLampFar){vec2 gq=vec2((vLP.x-uLampP.x)*uLampP.z,(uLampP.y-vLP.z)*uLampP.z);'+
  'float gg=texture2D(uGlowMap,clamp(gq,0.0,1.0)).r*step(0.0,min(gq.x,gq.y))*step(max(gq.x,gq.y),1.0);'+
  'float gh=1.0-smoothstep(2.0,16.0,vLP.y-uLampP.w);'+
  'float gn=normalize(vLN).y;float gu=max(smoothstep(0.45,0.85,gn),0.45*(1.0-abs(gn)));'+ // lueur : seulement sur le sol, jamais sur les murs
  
- 'totalEmissiveRadiance+=diffuseColor.rgb*uGlowCol*(gg*gh*gu*uGlowK*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
+ 'totalEmissiveRadiance+=(diffuseColor.rgb*0.8+vec3(0.05))*uGlowCol*(gg*gh*gu*uGlowK*(1.0-smoothstep(uLampFar*0.7,uLampFar,ld)));}';
 function boxBlur(src,GN,r){const t=new Float32Array(src.length),o=new Float32Array(src.length),L=2*r+1;
  for(let y=0;y<GN;y++){const row=y*GN;let s=0;for(let k=-r;k<=r;k++)s+=(k>=0&&k<GN)?src[row+k]:0;
   for(let x=0;x<GN;x++){t[row+x]=s/L;const a=x-r,b=x+r+1;s-=(a>=0&&a<GN)?src[row+a]:0;s+=(b>=0&&b<GN)?src[row+b]:0}}
@@ -1276,8 +1276,6 @@ const binLoader=new THREE.GLTFLoader();
 try{if(THREE.DRACOLoader){const d=new THREE.DRACOLoader();d.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.5/');binLoader.setDRACOLoader(d)}}catch(e){console.warn('Draco',e)}
 try{if(window.MeshoptDecoder)binLoader.setMeshoptDecoder(window.MeshoptDecoder)}catch(e){console.warn('Meshopt',e)}
 function loadBinModels(){return Promise.all(BIN_URLS.map((u,i)=>new Promise(res=>{try{binLoader.load(u,g=>{BINGLB[i]=g.scene;res()},undefined,e=>{BINERR.push(i+1);console.warn('Poubelle GLB '+(i+1)+' : échec de chargement',u,e);res()})}catch(e){BINERR.push(i+1);console.warn(e);res()}})))}
-// poubelle de secours (si un GLB ne charge pas) : corps + couvercle, pour qu'il y ait TOUJOURS des poubelles
-function makeBinFallback(){const g=new THREE.Group(),mat=new THREE.MeshStandardMaterial({color:0x2d3a33,roughness:.75,metalness:.25}),a=new THREE.Mesh(new THREE.CylinderGeometry(.22,.19,.85,14),mat),b=new THREE.Mesh(new THREE.CylinderGeometry(.25,.25,.07,14),mat);a.position.y=.425;b.position.y=.885;g.add(a);g.add(b);return g}
 // Carrefours : on cherche les cases de route qui font partie d'une rue longue dans les DEUX sens (= le carré où deux rues se croisent), puis les 4 coins de ce carré → on file en diagonale jusqu'au trottoir
 function collectCorners(mpu){
  const C=LCTX;if(!C)return [];
@@ -1312,7 +1310,7 @@ function collectCorners(mpu){
  return out}
 function placeBins(o,L,mpu){
  const C=LCTX;if(!C){BINDIAG='carte routes/trottoirs indisponible';return 0}
- BINFB=[];BINGLB.forEach((sc,i)=>{if(!sc){BINGLB[i]=makeBinFallback();BINFB.push(i+1)}});
+ BINFB=BINGLB.map((sc,i)=>sc?0:i+1).filter(Boolean);if(!BINGLB.some(Boolean)){BINDIAG='aucun GLB de poubelle chargé (erreurs : '+(BINERR.join(',')||'?')+')';return 0}
  const corners=collectCorners(mpu);BINDIAG='carrefours '+(corners.nc||0)+' · coins '+corners.length+' (carrés '+(corners.nb||0)+' + pointes '+(corners.nt||0)+')';if(!corners.length)return 0;
  const U=1/mpu,R8=7*U;
  const okAt=(x,z)=>{const i=Math.floor((x-C.x0)/C.cell),j=Math.floor((z-C.z0)/C.cell);if(i<0||j<0||i>=C.Dx||j>=C.Dz)return null;const k=j*C.Dx+i;return (C.S[k]&&!C.R[k])?C.YS[k]:null};
@@ -1450,9 +1448,10 @@ function start(o){
   tg.add(roadOnlyTile(o,FL.hide));outerG.add(tg)}
  wrap.add(outerG);if(info){try{wrap.add(buildCaps(o,info,sz))}catch(e){console.warn('fermeture',e)}}
  scene.add(wrap);loadTags();const NWIN=autoWindows();buildMap();spawn();applyShadows();const LH=buildLights();
- msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'POUBELLES : '+NBIN+' posées (GLB '+(3-BINFB.length)+'/3'+(BINFB.length?', secours pour n°'+BINFB.join(','):'')+') — Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN+' ['+BINDIAG+' · GLB chargés '+(3-BINFB.length)+'/3'+(BINFB.length?' · secours n°'+BINFB.join(','):'')+']';
+ msg.textContent=MAP.free?'Aucune zone marchable détectée : essaie Échelle − / +':'POUBELLES : '+NBIN+' posées (GLB '+(3-BINFB.length)+'/3'+(BINFB.length?', non chargés n°'+BINFB.join(','):'')+') — Joystick = marcher · glisse = caméra · 2 doigts = zoom caméra · arbres masqués : '+NT+' · objets supprimés : '+ND+' · invisibles retirés : '+NP+' · lampes : '+LAMPS.length+' ('+LH+') · fenêtres : '+NWIN+' · trottoirs : '+NS+' · goudron : '+NA+' · blocs : '+TL.length+' · auvents : '+NAW+' · lignes : '+NM+' · lampadaires GLB : '+NLP+'/'+LPOS.length+' (dont '+NFILL+' ajoutés) · poubelles : '+NBIN+' ['+BINDIAG+' · GLB chargés '+(3-BINFB.length)+'/3'+(BINFB.length?' · non chargés n°'+BINFB.join(','):'')+']';
  TILECULL=true;bootSet('Prêt !',1);try{r.compile(scene,cam)}catch(e){}setTimeout(bootHide,600);setTimeout(()=>msg.style.opacity=0,15000)}
-tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);Promise.all([loadLampModels(),loadBinModels()]).then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
+const PRELOAD=Promise.all([loadLampModels(),loadBinModels()]); // téléchargés EN PARALLÈLE de la ville (avant : on attendait la ville, puis eux)
+tryLoad([R2+'new_york_city.glb',base+'Models/new_york_city.glb'],g=>{bootSet('Construction de la ville…',.9);bootSet('Chargement des lampadaires…',.92);Promise.race([PRELOAD,new Promise(res=>setTimeout(res,30000))]).then(()=>requestAnimationFrame(()=>setTimeout(()=>{try{start(g.scene)}catch(err){bootHide();console.error(err);msg.style.opacity=1;msg.textContent='Erreur : '+err.message}},40)))},u=>{msg.textContent='Erreur de chargement : '+u;bootHide()},
  e=>{if(e.total){const p=Math.round(e.loaded/e.total*100);msg.textContent='Chargement New York '+p+'%';bootSet('Chargement de la ville… '+p+' %',p/100*.85)}});
 
 // ===== Système d'intérieurs (appartements) : branché sur le joueur P, la caméra et le chargeur GLB existants =====
@@ -1462,18 +1461,18 @@ INTERIORS.api.attach({THREE,topAt,cityStats,scene,cam,renderer:r,P,ground,npcGro
  getView:()=>({yaw,pitch,dist:wantDist}),setView:(y,p,d)=>{yaw=y;pitch=p;wantDist=d;camDist=d}});
 // ===== Boucle =====
 onresize=()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)};
-// ===== Gouverneur de performance (jour ET nuit) : si le jeu passe sous ~36 i/s, il baisse petit à petit les effets les plus gourmands ; il remonte tout seul au retour du jour =====
-const PERF={lvl:0,ema:0,cool:0,warm:performance.now()/1000+20,night:false},PERF_PR=[1.5,1.5,1.5,1.5],PERF_LF=[320,260,200,150],PERF_WF=[700,520,380,260];
-function perfApply(){WINK.uFar.value=PERF_WF[PERF.lvl]} // le gouverneur ne touche plus JAMAIS aux lampadaires (ni halos, ni lumière au sol) : seulement la portée des fenêtres allumées
+// ===== Objectif 60 images/s (jour ET nuit) : plafonné à 60 (écrans 120 Hz = 2× moins de travail) ; si le jeu passe sous ~50 i/s, la résolution baisse d'un palier (3 max, jamais de va-et-vient) =====
+const PERF={lvl:0,ema:0,cool:0,warm:performance.now()/1000+12},PERF_K=[1,.9,.8,.72],PERF_WF=[700,520,380,260],PR_BASE=Math.min(devicePixelRatio||1,IS_MOBILE?1.25:1.5);
+function perfApply(){const l=PERF.lvl,pr=Math.max(.9,PR_BASE*PERF_K[l]);if(Math.abs(pr-r.getPixelRatio())>.01)r.setPixelRatio(pr);WINK.uFar.value=PERF_WF[l]} // jamais de changement sur les lampadaires ni leurs halos
 function perfStep(raw,now){
  if(!(raw>0&&raw<.25))return;
  PERF.ema=PERF.ema?PERF.ema+(raw-PERF.ema)*.04:raw;
- const night=TOD.lamp>.05||WIN.value>.05;
  if(now<PERF.cool||now<PERF.warm)return;
- if(PERF.ema>.028&&PERF.lvl<3){PERF.lvl++;if(night)PERF.night=true;perfApply();PERF.cool=now+8;PERF.ema=0}
- else if(!night&&PERF.night){PERF.night=false;if(PERF.lvl>0){PERF.lvl=0;perfApply();PERF.cool=now+3;PERF.ema=0}}}
+ if(PERF.ema>.0195&&PERF.lvl<3){PERF.lvl++;perfApply();PERF.cool=now+6;PERF.ema=0}}
+perfApply();
 let tPrev=performance.now()/1000;
-(function loop(){requestAnimationFrame(loop);const now=performance.now()/1000,raw=now-tPrev,dt=Math.min(.05,raw);tPrev=now;
+(function loop(){requestAnimationFrame(loop);if(performance.now()/1000-tPrev<.0125)return; // plafond ≈ 60 i/s : sur un écran 120 Hz on saute une image sur deux
+ const now=performance.now()/1000,raw=now-tPrev,dt=Math.min(.05,raw);tPrev=now;
  if(MAP){
   const m=Math.min(1,Math.hypot(jx,jy));
   if(m>0){const fx=-Math.sin(yaw),fz=-Math.cos(yaw),rx=Math.cos(yaw),rz=-Math.sin(yaw);
